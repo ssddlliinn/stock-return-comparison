@@ -52,7 +52,7 @@ def get_finmind_data(dataset_name, start_date = '1996-01-01', end_date = None, s
                                   (TW_TRADING_DATES <= datetime.strptime(end_date, '%Y-%m-%d'))])
     
     if local_files:
-        #讀取所有的資料庫，所以資料都從1996開始
+        #讀取所有的資料庫，所有資料都從1996開始
         print(f"Checking existing local data for {dataset_name}...")
         for f in sorted(local_files): # 按名稱排序，通常按年份排
             if f[:4] not in {str(i.year) for i in download_date_set}:
@@ -216,8 +216,8 @@ if __name__ == "__main__":
     print("--- 測試下載台灣股價資料 ---")
     tw_stock_data = get_finmind_data(
         dataset_name='taiwan_stock_daily',
-        start_date='1999-01-01',
-        end_date='2000-01-31'
+        start_date='2005-01-01',
+        end_date='2008-12-31'
     )
     
     if not tw_stock_data.empty:
