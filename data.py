@@ -31,6 +31,7 @@ def get_finmind_data(dataset_name, start_date = '1996-01-01', end_date = None, s
     if dataset_name not in DATASETS:
         raise ValueError("Dataset name not found. Please check again.")
     
+    #取當日為最後日
     if end_date is None:
         end_date = datetime.now().strftime('%Y-%m-%d')
     
@@ -48,18 +49,15 @@ def get_finmind_data(dataset_name, start_date = '1996-01-01', end_date = None, s
         local_files = [f for f in os.listdir(dataset_path) if stock_id in f]
     else:
         local_files = [f for f in os.listdir(dataset_path) if f.endswith('.parquet')]
+        
+    # 2. 取出所有要下載日期的list[目前trading date 以台積電1996-2024的交易日為主]
+    download_date_set = set(TW_TRADING_DATES[TW_TRADING_DATES.between(start_date, end_date)])
     
-    # 2. 檢查本地資料
-    latest_local_date = None
-    earliest_local_date = None
+    # 3. 檢查本地資料
     local_data_exists = False
     download_required = False
-    local_dfs = [] 
-    
-    #3. 取出所有要下載日期的list
-    download_date_set = set(TW_TRADING_DATES[(TW_TRADING_DATES >= datetime.strptime(start_date, '%Y-%m-%d')) & 
-                                  (TW_TRADING_DATES <= datetime.strptime(end_date, '%Y-%m-%d'))])
-    
+    local_dfs = []
+
     if local_files:
         #讀取資料庫，所有資料都從1996開始
         print(f"Checking existing local data for {dataset_name} {stock_id}...")
@@ -89,7 +87,6 @@ def get_finmind_data(dataset_name, start_date = '1996-01-01', end_date = None, s
                 all_local_data = pd.concat(local_dfs, ignore_index=True)
             else:
                 all_local_data = local_dfs[0] #指定股票，讀取單一資料庫
-            latest_local_date = all_local_data['date'].max()
             
         else: # 沒有成功讀取任何本地檔案
             local_data_exists = False
@@ -123,13 +120,13 @@ def get_finmind_data(dataset_name, start_date = '1996-01-01', end_date = None, s
             dataset_method = getattr(fm, dataset_name)
             if callable(dataset_method):
                 if stock_id != 'all':
-                    #以date_set的起始日跟結束日作為FinMind資料的輸入值
-                    start_date_str = download_date_set[0].strftime('%Y-%m-%d') #已經sort過了，所以可以直接取第一跟最後
-                    end_date_str = download_date_set[-1].strftime('%Y-%m-%d')
+                    #以download_date_set的起始日跟結束日作為FinMind資料的輸入值
+                    download_start_date_str = download_date_set[0].strftime('%Y-%m-%d') #已經sort過了，所以可以直接取第一跟最後
+                    download_end_date_str = download_date_set[-1].strftime('%Y-%m-%d')
                     finmind_df = dataset_method(
                         stock_id = stock_id, 
-                        start_date = start_date_str,
-                        end_date = end_date_str
+                        start_date = download_start_date_str,
+                        end_date = download_end_date_str
                     )
                 else: #讀取特定日期所有資料
                     for date in download_date_set:
@@ -149,20 +146,22 @@ def get_finmind_data(dataset_name, start_date = '1996-01-01', end_date = None, s
             print(f"{fm.api_usage} / {fm.api_usage_limit}")
             if finmind_df.empty:
                 print(f"No new data downloaded from FinMind for {dataset_name} {stock_id} in the specified range.")
-                print("Or maybe you entered a wrong stock ID.")
+                print(f"Maybe this dataset does not have data between {download_start_date_str} and {download_end_date_str}. Or maybe you entered a wrong stock ID.")
             else:
                 print(f"Downloaded {len(finmind_df)} rows from FinMind for {dataset_name} {stock_id}.")
+                
+                ### 可能需要更新較舊資料，所以這部分先不使用，直接用final_df去除重複值
                 # 確保日期是 datetime 類型
-                finmind_df['date'] = pd.to_datetime(finmind_df['date'])
-                # FinMind 下載的資料可能包含重複或與本地數據重複的部分
-                # 通常下載的是最新數據，所以我們要處理日期範圍的重疊
-                if local_data_exists and not finmind_df.empty:
-                    # 篩選掉 FinMind 下載數據中，日期早於或等於本地最新日期的數據
-                    finmind_df = finmind_df[finmind_df['date'] > latest_local_date]
-                    if finmind_df.empty:
-                        print("Downloaded data is older than or same as local data. No new data to add.")
-                    else:
-                        print(f"Filtered downloaded data: {len(finmind_df)} new rows after removing overlaps.")
+                # finmind_df['date'] = pd.to_datetime(finmind_df['date'])
+                # # FinMind 下載的資料可能包含重複或與本地數據重複的部分
+                # # 通常下載的是最新數據，所以我們要處理日期範圍的重疊
+                # if local_data_exists and not finmind_df.empty:
+                #     # 篩選掉 FinMind 下載數據中，日期早於或等於本地最新日期的數據
+                #     finmind_df = finmind_df[finmind_df['date'] > latest_local_date]
+                #     if finmind_df.empty:
+                #         print("Downloaded data is older than or same as local data. No new data to add.")
+                #     else:
+                #         print(f"Filtered downloaded data: {len(finmind_df)} new rows after removing overlaps.")
                 
         except Exception as e:
             print(f"Error downloading from FinMind: {e}")
@@ -171,27 +170,34 @@ def get_finmind_data(dataset_name, start_date = '1996-01-01', end_date = None, s
     # 4. 合併本地和新下載的資料，並儲存到本地
     final_df = None
     if local_data_exists and not all_local_data.empty:
+        #有本地資料、本地資料df不為空、下載資料不為空
         if not finmind_df.empty:
+            all_local_data['date'] = pd.to_datetime(all_local_data['date'])
+            finmind_df['date'] = pd.to_datetime(finmind_df['date'])
+            
             final_df = pd.concat([all_local_data, finmind_df], ignore_index=True)
             # 去除重複項，以 'date' 和 'stock_id' 作為判斷重複的依據
-            # 如果下載的資料可能包含歷史資料修正，則需要更複雜的去重邏輯
-            # 這裡假設 FinMind 下載的資料是追加性的，且日期和股票ID唯一
             final_df = final_df.drop_duplicates(subset=['date', 'stock_id']).sort_values(by=['date', 'stock_id']).reset_index(drop=True)
             print(f"Combined local and downloaded data. Total rows: {len(final_df)}")
+        #有本地資料、本地資料df不為空、下載資料空的
         else:
-            final_df = all_local_data # 沒有新下載的數據，就用本地現有的
+            all_local_data['date'] = pd.to_datetime(all_local_data['date'])
+            final_df = all_local_data
 
+    #本地資料df為空、下載資料不為空
     elif not finmind_df.empty:
-        final_df = finmind_df # 如果本地沒有數據，就直接用下載的
+        finmind_df['date'] = pd.to_datetime(finmind_df['date'])
+        final_df = finmind_df
         final_df = final_df.drop_duplicates(subset=['date', 'stock_id']).sort_values(by=['date', 'stock_id']).reset_index(drop=True)
+    # 本地資料df為空、下載資料空的
     else:
         print("No data available locally or from download.")
-        return pd.DataFrame() # 完全沒有資料，返回空 DataFrame
-        
+        return pd.DataFrame()
+    
+    # 5. 將合併後的資料按年份儲存到本地 Parquet 檔案    
     if final_df is not None and not final_df.empty:
-        # 5. 將合併後的資料按年份儲存到本地 Parquet 檔案
-        # 這裡假設你的 FinMind 資料集會包含 'date' 欄位
-        if download_required and (stock_id == 'all'):
+        #下載資料不為空、所有股票
+        if not finmind_df.empty and (stock_id == 'all'):
             final_df['year'] = final_df['date'].dt.year
             
             for year, group_df in final_df.groupby('year'):
@@ -202,19 +208,22 @@ def get_finmind_data(dataset_name, start_date = '1996-01-01', end_date = None, s
                 print(f"Saved data for year {year} to {output_file}")
                 
             # 返回完整的合併資料
-            print("現階段日期區間共有", final_df.shape, "筆資料")
-            return final_df[final_df['stock_id'] == stock_id].drop(columns=['year']) # 返回時移除輔助的'year'欄位
+            print(f"現階段日期區間為{final_df['date'].min()}到{final_df['date'].max()}，共有", final_df.shape, "筆資料")
+            return final_df.drop(columns=['year'])[final_df['date'].between(start_date, end_date)] # 返回時移除輔助的'year'欄位
         
-        elif download_required and (stock_id != 'all'):
+        elif not finmind_df.empty and (stock_id != 'all'):
             output_file = dataset_path / f"{stock_id}.parquet"
             final_df.to_parquet(output_file, index=False, compression='snappy')
-            print("現階段日期區間共有", final_df.shape, "筆資料")
+            print(f"現階段日期區間{final_df['date'].min()}到{final_df['date'].max()}，共有", final_df.shape, "筆資料")
 
-            return final_df
+            return final_df[final_df['date'].between(start_date, end_date)]
         else:
             print("不需下載資料，直接返回本地資料並不做儲存。")
-            print("現階段日期區間共有", final_df.shape, "筆資料")
-            return final_df[final_df['stock_id'] == stock_id] # 返回時移除輔助的'year'欄位
+            print(f"現階段日期區間{final_df['date'].min()}到{final_df['date'].max()}，共有", final_df.shape, "筆資料")
+            if stock_id != 'all':
+                return final_df[final_df['date'].between(start_date, end_date)]
+            else:
+                return final_df[final_df['stock_id'] == stock_id]
     else:
         return pd.DataFrame()
     
@@ -227,19 +236,20 @@ if __name__ == "__main__":
     tw_stock_data = get_finmind_data(
         # dataset_name='taiwan_stock_dividend_result',
         dataset_name='taiwan_stock_daily',
-        stock_id='all',
-        start_date='2018-01-01',
-        end_date='2020-12-31'
+        stock_id='3008',
+        start_date='2005-01-01',
+        end_date='2024-12-31'
     )
     
     if not tw_stock_data.empty:
-        print(f"Successfully retrieved Taiwan Stock Data. Last 5 rows:\n{tw_stock_data.tail()}")
+        print(f"Successfully retrieved Taiwan Stock Data. Last 5 rows:\n{tw_stock_data.head()}\n{tw_stock_data.tail()}")
         print(f"Data range: {tw_stock_data['date'].min().strftime('%Y-%m-%d')} to {tw_stock_data['date'].max().strftime('%Y-%m-%d')}")
         print(f"Total rows: {len(tw_stock_data)}")
     else:
         print("Failed to retrieve Taiwan Stock Data.")
 
     print("\n" + "="*50 + "\n")
+    input("Checked:")
 
     # 範例 2: 再次執行，應該會檢查本地數據並判斷是否需要更新
     # print("--- 再次測試下載台灣股價資料 (應該會檢查並可能只下載最新部分) ---")
