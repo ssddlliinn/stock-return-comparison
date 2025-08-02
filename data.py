@@ -23,6 +23,7 @@ def get_finmind_data(dataset_name, start_date = '1996-01-01', end_date = None, s
                                     預設為 None，會根據本地資料或 FinMind 的預設最早日期來決定。
         end_date (str, optional): 資料結束日期 (YYYY-MM-DD)。預設為今天。
         目前儲存到交易日期為1996-01-01~2024-12-31
+        ******該函式以獲取完整每日資料為目標設計，所以非每日資料的資料集會一直重複撈取資料(Ex.除權息)
 
     Returns:
         pd.DataFrame: 合併後的資料集 DataFrame。
@@ -46,7 +47,7 @@ def get_finmind_data(dataset_name, start_date = '1996-01-01', end_date = None, s
         
     # 如果stock_id = 'all'，才讀所有資料夾
     if stock_id != 'all':
-        local_files = [f for f in os.listdir(dataset_path) if stock_id in f]
+        local_files = [f for f in os.listdir(dataset_path) if f.startswith(stock_id) and f.endswith('.parquet')]
     else:
         local_files = [f for f in os.listdir(dataset_path) if f.endswith('.parquet')]
         
@@ -59,7 +60,7 @@ def get_finmind_data(dataset_name, start_date = '1996-01-01', end_date = None, s
     local_dfs = []
 
     if local_files:
-        #讀取資料庫，所有資料都從1996開始
+        #讀取資料庫，所有資料版本都從1996開始
         print(f"Checking existing local data for {dataset_name} {stock_id}...")
         for f in sorted(local_files): # 按名稱排序，通常按年份排
             if (f[:4] not in {str(i.year) for i in download_date_set}) and (stock_id == 'all'):
@@ -87,6 +88,7 @@ def get_finmind_data(dataset_name, start_date = '1996-01-01', end_date = None, s
                 all_local_data = pd.concat(local_dfs, ignore_index=True)
             else:
                 all_local_data = local_dfs[0] #指定股票，讀取單一資料庫
+                # assert all_local_data['stock_id'].unique()
             
         else: # 沒有成功讀取任何本地檔案
             local_data_exists = False
@@ -150,7 +152,7 @@ def get_finmind_data(dataset_name, start_date = '1996-01-01', end_date = None, s
             else:
                 print(f"Downloaded {len(finmind_df)} rows from FinMind for {dataset_name} {stock_id}.")
                 
-                ### 可能需要更新較舊資料，所以這部分先不使用，直接用final_df去除重複值
+                ### 可能需要更新任意區間日期資料，所以這部分先不使用，直接用final_df去除重複值
                 # 確保日期是 datetime 類型
                 # finmind_df['date'] = pd.to_datetime(finmind_df['date'])
                 # # FinMind 下載的資料可能包含重複或與本地數據重複的部分
@@ -227,29 +229,74 @@ def get_finmind_data(dataset_name, start_date = '1996-01-01', end_date = None, s
     else:
         return pd.DataFrame()
     
+
+# 合併單一股票的日股價資料與除權息紀錄
+def summary_monthly_data(stock_id, start_date = '1996-01-01', end_date = None):
+    # 日股價資料
+    price_data = get_finmind_data(
+        dataset_name='taiwan_stock_daily',
+        stock_id=stock_id, 
+        start_date=start_date,
+        end_date=end_date
+        )
     
+    # 除權息資料
+    div_data = get_finmind_data(
+        dataset_name='taiwan_stock_dividend_result',
+        stock_id=stock_id, 
+        start_date=start_date,
+        end_date=end_date
+        )
+    
+    # 確定日期資料是時間格式
+    price_data['date'] = pd.to_datetime(price_data['date'])
+    price_data = price_data.set_index('date')
+    # 以月分為單位做groupby，取最後交易日股價並做百分比增減，得到月份報酬資料(日期以最後交易日表示)
+    monthly_last_close = price_data.groupby([pd.Grouper(freq='ME')])['close'].last() # 一班groupby只能以日為單位，要用Grouper才能以年、月、劑等頻率整併資料
+    monthly_summary = pd.DataFrame({'monthly_return':monthly_last_close.pct_change()})
+    
+    monthly_summary = monthly_summary.reset_index()
+    monthly_summary.rename(columns={'date': 'month'}, inplace=True)
+    # 把日期資料換成以月分資料表示
+    monthly_summary['month'] = monthly_summary['month'].dt.to_period('M')
+
+    # 確定日期資料是時間格式
+    div_data['date'] = pd.to_datetime(div_data['date'])
+    # 把日期資料換成以月分資料表示
+    div_data['month'] = div_data['date'].dt.to_period('M')
+    div_data['yield'] = div_data['stock_and_cache_dividend'] / div_data['before_price'] #計算股價值利率
+    monthly_div = pd.DataFrame({'month':div_data['month'], 'dividend_yield':div_data['yield']})
+
+    # 以股票代碼及年月為合併基準，把月報酬跟除權息殖利率合併
+    # no index、columns=['stock_id', 'month', 'monthly_return', 'dividend_yield']
+    final_df = pd.merge(monthly_summary, monthly_div, on=['month'], how='left')
+    final_df['stock_id'] = stock_id
+    final_df = final_df.loc[:, ['stock_id', 'month', 'monthly_return', 'dividend_yield']]
+    final_df = final_df.fillna(0)
+    return final_df
+
     
     
 if __name__ == "__main__":
     # 範例 1: 下載台灣股價資料 (假設本地沒有或不完整)
-    print("--- 測試下載台灣股價資料 ---")
-    tw_stock_data = get_finmind_data(
-        # dataset_name='taiwan_stock_dividend_result',
-        dataset_name='taiwan_stock_daily',
-        stock_id='3008',
-        start_date='2005-01-01',
-        end_date='2024-12-31'
-    )
+    # print("--- 測試下載台灣股價資料 ---")
+    # tw_stock_data = get_finmind_data(
+    #     # dataset_name='taiwan_stock_dividend_result',
+    #     dataset_name='taiwan_stock_daily',
+    #     stock_id='3008',
+    #     start_date='2005-01-01',
+    #     end_date='2024-12-31'
+    # )
     
-    if not tw_stock_data.empty:
-        print(f"Successfully retrieved Taiwan Stock Data. Last 5 rows:\n{tw_stock_data.head()}\n{tw_stock_data.tail()}")
-        print(f"Data range: {tw_stock_data['date'].min().strftime('%Y-%m-%d')} to {tw_stock_data['date'].max().strftime('%Y-%m-%d')}")
-        print(f"Total rows: {len(tw_stock_data)}")
-    else:
-        print("Failed to retrieve Taiwan Stock Data.")
+    # if not tw_stock_data.empty:
+    #     print(f"Successfully retrieved Taiwan Stock Data. Last 5 rows:\n{tw_stock_data.head()}\n{tw_stock_data.tail()}")
+    #     print(f"Data range: {tw_stock_data['date'].min().strftime('%Y-%m-%d')} to {tw_stock_data['date'].max().strftime('%Y-%m-%d')}")
+    #     print(f"Total rows: {len(tw_stock_data)}")
+    # else:
+    #     print("Failed to retrieve Taiwan Stock Data.")
 
-    print("\n" + "="*50 + "\n")
-    input("Checked:")
+    # print("\n" + "="*50 + "\n")
+    # input("Checked:")
 
     # 範例 2: 再次執行，應該會檢查本地數據並判斷是否需要更新
     # print("--- 再次測試下載台灣股價資料 (應該會檢查並可能只下載最新部分) ---")
@@ -268,3 +315,16 @@ if __name__ == "__main__":
     #     dataset_name='USStockDailyPrice',
     #     start_date='2024-01-01'
     # )
+    
+    # 範例3：使用summary合併股價與除權息資料
+    print("--- 測試合併股價與除權息資料 ---")
+    df = summary_monthly_data(
+        stock_id='2330'
+        )
+    
+    if not df.empty:
+        print(f"Successfully retrieved Summary Date. Last 5 rows:\n{df.head()}\n{df.tail()}")
+        print(df.dtypes)
+    else:
+        print("Failed to retrieve Summary Data.")
+        
