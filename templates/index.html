@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>股價報酬率比較工具</title>
+    <!-- 引入 Plotly CDN -->
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f2f5;
+            color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            width: 100%;
+            background-color: #fff;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+        }
+        h1 {
+            text-align: center;
+            color: #0056b3;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            font-weight: 600;
+        }
+        .input-row {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 25px;
+            align-items: center;
+        }
+        .input-item {
+            flex: 1;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+        input[type="text"], input[type="date"], input[type="number"], select {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 1em;
+            transition: border-color 0.3s ease;
+            box-sizing: border-box;
+        }
+        input[type="text"]:focus, input[type="date"]:focus, input[type="number"]:focus, select:focus {
+            outline: none;
+            border-color: #007bff;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 15px 25px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1.2em;
+            font-weight: bold;
+            width: 100%;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+        }
+        button:hover {
+            background-color: #0056b3;
+            transform: translateY(-2px);
+        }
+        #chart-container {
+            margin-top: 40px;
+            background-color: #fff;
+            border: 1px solid #eee;
+            border-radius: 8px;
+            padding: 10px;
+            min-height: 400px;
+        }
+        #plotly-chart {
+            width: 100%;
+            height: 100%;
+        }
+        .error-message {
+            color: #d9534f;
+            background-color: #f2dede;
+            border: 1px solid #ebccd1;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 20px;
+            text-align: center;
+            display: none; /* 預設隱藏 */
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #555;
+            font-size: 1.2em;
+            display: none; /* 預設隱藏 */
+        }
+        .metrics-table {
+            width: 100%;
+            margin-top: 30px;
+            border-collapse: collapse;
+        }
+        .metrics-table th, .metrics-table td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: center;
+        }
+        .metrics-table th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+            color: #555;
+        }
+        .metrics-table tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        .metrics-table tr:hover {
+            background-color: #f1f1f1;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>股價報酬率比較</h1>
+
+        <div class="input-row">
+            <div class="input-item">
+                <label for="start_date">起始日期:</label>
+                <input type="date" id="start_date" value="2015-01-01">
+            </div>
+            <div class="input-item">
+                <label for="end_date">結束日期:</label>
+                <input type="date" id="end_date" value="2024-12-31">
+            </div>
+            <div class="input-item">
+                <label for="initial_capital">初始資本:</label>
+                <input type="number" id="initial_capital" value="1000000" min="1000">
+            </div>
+        </div>
+
+        <div class="input-row">
+            <div class="input-item">
+                <label for="stock1_id">股票/組合 1 代碼:</label>
+                <input type="text" id="stock1_id" value="0050">
+            </div>
+            <div class="input-item">
+                <label for="stock2_id">股票/組合 2 代碼:</label>
+                <input type="text" id="stock2_id" value="0056">
+            </div>
+            <div class="input-item">
+                <label for="stock3_id">股票/組合 3 代碼:</label>
+                <input type="text" id="stock3_id" value="2330">
+            </div>
+        </div>
+
+        <div class="input-row">
+            <div class="input-item">
+                <label for="reinvest_dividends">股息處理:</label>
+                <select id="reinvest_dividends">
+                    <option value="true">再投入 (Reinvest)</option>
+                    <option value="false">領出 (Withdraw)</option>
+                    <option value="specific">比照投資組合1 (Specific)</option>
+                </select>
+            </div>
+            <div class="input-item">
+                <label for="display_mode">圖表Y軸顯示:</label>
+                <select id="display_mode">
+                    <option value="return">累計報酬率</option>
+                    <option value="value">累積金額</option>
+                </select>
+            </div>
+        </div>
+
+        <button onclick="fetchChart()">生成圖表</button>
+
+        <p id="loading-message" class="loading">圖表生成中...</p>
+        <p id="error-message" class="error-message">錯誤訊息</p>
+
+        <div id="chart-container">
+            <!-- Plotly 圖表將渲染在這裡 -->
+            <div id="plotly-chart"></div>
+        </div>
+        
+        <div id="metrics-table-container">
+            <!-- 比較表格將渲染在這裡 -->
+        </div>
+
+    </div>
+
+    <script>
+        async function fetchChart() {
+            const stock1_id = document.getElementById('stock1_id').value.toUpperCase();
+            const stock2_id = document.getElementById('stock2_id').value.toUpperCase();
+            const stock3_id = document.getElementById('stock3_id').value.toUpperCase();
+            const reinvest_dividends = document.getElementById('reinvest_dividends').value;
+            const initial_capital = document.getElementById('initial_capital').value;
+            const display_mode = document.getElementById('display_mode').value;
+            const start_date = document.getElementById('start_date').value;
+            const end_date = document.getElementById('end_date').value;
+            
+            const errorMessage = document.getElementById('error-message');
+            const loadingMessage = document.getElementById('loading-message');
+            const chartDiv = document.getElementById('plotly-chart');
+            const metricsTableContainer = document.getElementById('metrics-table-container');
+
+            errorMessage.style.display = 'none';
+            loadingMessage.style.display = 'block';
+            
+            Plotly.purge(chartDiv);
+            metricsTableContainer.innerHTML = '';
+
+            if (!stock1_id && !stock2_id && !stock3_id) {
+                errorMessage.textContent = '請至少輸入一檔股票或投資組合代碼。';
+                errorMessage.style.display = 'block';
+                loadingMessage.style.display = 'none';
+                return;
+            }
+
+            try {
+                const response = await fetch('/get_chart_data', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: `stock1_id=${stock1_id}&stock2_id=${stock2_id}&stock3_id=${stock3_id}&reinvest_dividends=${reinvest_dividends}&initial_capital=${initial_capital}&display_mode=${display_mode}&start_date=${start_date}&end_date=${end_date}`
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                const graph_json = JSON.parse(data.graph_json);
+                const metrics = data.metrics;
+
+                loadingMessage.style.display = 'none';
+                Plotly.newPlot('plotly-chart', graph_json.data, graph_json.layout);
+                renderMetricsTable(metrics, display_mode);
+
+            } catch (error) {
+                console.error('獲取資料時發生錯誤:', error);
+                loadingMessage.style.display = 'none';
+                errorMessage.textContent = error.message;
+                errorMessage.style.display = 'block';
+            }
+        }
+        
+        function renderMetricsTable(metrics, display_mode) {
+            const metricsTableContainer = document.getElementById('metrics-table-container');
+            const stocks = metrics.stocks_input;
+            const metricsData = metrics.metrics_data;
+
+            if (stocks.length === 0) return;
+
+            let tableHTML = `<table class="metrics-table"><thead><tr><th>指標</th>`;
+            stocks.forEach(stock => {
+                tableHTML += `<th>${stock}</th>`;
+            });
+            tableHTML += `</tr></thead><tbody>`;
+
+            // 年化報酬率
+            tableHTML += `<tr><td>年化報酬率</td>`;
+            metricsData.forEach(m => {
+                tableHTML += `<td>${(m.annualized_return * 100).toFixed(2)}%</td>`;
+            });
+            tableHTML += `</tr>`;
+
+            // 年化波動率
+            tableHTML += `<tr><td>年化波動率</td>`;
+            metricsData.forEach(m => {
+                tableHTML += `<td>${(m.annualized_volatility * 100).toFixed(2)}%</td>`;
+            });
+            tableHTML += `</tr>`;
+
+            // 總領股息
+            tableHTML += `<tr><td>總領股息</td>`;
+            metricsData.forEach(m => {
+                tableHTML += `<td>$${m.total_dividends.toFixed(2)}</td>`;
+            });
+            tableHTML += `</tr>`;
+
+            tableHTML += `</tbody></table>`;
+            metricsTableContainer.innerHTML = tableHTML;
+        }
+    </script>
+</body>
+</html>

@@ -231,47 +231,64 @@ def get_finmind_data(dataset_name, start_date = '1996-01-01', end_date = None, s
     
 
 # 合併單一股票的日股價資料與除權息紀錄
-def summary_monthly_data(stock_id, start_date = '1996-01-01', end_date = None):
+def summary_monthly_data(stock_id, market='tw', start_date = '1996-01-01', end_date = None):
     # 日股價資料
+    dataset_name = 'taiwan_stock_daily' if market=='tw' else 'us_stock_price'
+    price_col = 'close' if market=='tw' else 'Adj_Close'
+    
     price_data = get_finmind_data(
-        dataset_name='taiwan_stock_daily',
+        dataset_name=dataset_name,
         stock_id=stock_id, 
         start_date=start_date,
         end_date=end_date
         )
     
-    # 除權息資料
-    div_data = get_finmind_data(
-        dataset_name='taiwan_stock_dividend_result',
-        stock_id=stock_id, 
-        start_date=start_date,
-        end_date=end_date
-        )
+    if price_data.empty:
+        return pd.DataFrame()
     
     # 確定日期資料是時間格式
     price_data['date'] = pd.to_datetime(price_data['date'])
     price_data = price_data.set_index('date')
     # 以月分為單位做groupby，取最後交易日股價並做百分比增減，得到月份報酬資料(日期以最後交易日表示)
-    monthly_last_close = price_data.groupby([pd.Grouper(freq='ME')])['close'].last() # 一班groupby只能以日為單位，要用Grouper才能以年、月、劑等頻率整併資料
+    monthly_last_close = price_data.groupby([pd.Grouper(freq='ME')])[price_col].last() # 一般groupby只能以日為單位，要用Grouper才能以年、月、劑等頻率整併資料
     monthly_summary = pd.DataFrame({'monthly_return':monthly_last_close.pct_change()})
     
     monthly_summary = monthly_summary.reset_index()
     monthly_summary.rename(columns={'date': 'month'}, inplace=True)
     # 把日期資料換成以月分資料表示
     monthly_summary['month'] = monthly_summary['month'].dt.to_period('M')
+    
+    # 除權息資料
+    if market=='tw':
+        div_data = get_finmind_data(
+            dataset_name='taiwan_stock_dividend_result',
+            stock_id=stock_id, 
+            start_date=start_date,
+            end_date=end_date
+            )
+        
+        if not div_data.empty:
+            # 確定日期資料是時間格式
+            div_data['date'] = pd.to_datetime(div_data['date'])
+            # 把日期資料換成以月分資料表示
+            div_data['month'] = div_data['date'].dt.to_period('M')
+            div_data['yield'] = div_data['stock_and_cache_dividend'] / div_data['before_price'] #計算股價值利率
+            monthly_div = pd.DataFrame({'month':div_data['month'], 'dividend_yield':div_data['yield']})
 
-    # 確定日期資料是時間格式
-    div_data['date'] = pd.to_datetime(div_data['date'])
-    # 把日期資料換成以月分資料表示
-    div_data['month'] = div_data['date'].dt.to_period('M')
-    div_data['yield'] = div_data['stock_and_cache_dividend'] / div_data['before_price'] #計算股價值利率
-    monthly_div = pd.DataFrame({'month':div_data['month'], 'dividend_yield':div_data['yield']})
-
-    # 以股票代碼及年月為合併基準，把月報酬跟除權息殖利率合併
-    # no index、columns=['stock_id', 'month', 'monthly_return', 'dividend_yield']
-    final_df = pd.merge(monthly_summary, monthly_div, on=['month'], how='left')
+            # 以股票代碼及年月為合併基準，把月報酬跟除權息殖利率合併
+            # no index、columns=['stock_id', 'month', 'monthly_return', 'dividend_yield']
+            #TODO: expect columns for US stock ['stock_id', 'month', monthly_return_adj']
+            final_df = pd.merge(monthly_summary, monthly_div, on=['month'], how='left')
+            final_df['stock_id'] = stock_id
+            final_df = final_df.loc[:, ['stock_id', 'month', 'monthly_return', 'dividend_yield']]
+            final_df = final_df.fillna(0)
+            return final_df
+    
+    final_df = monthly_summary.copy()
     final_df['stock_id'] = stock_id
+    final_df['dividend_yield'] = 0
     final_df = final_df.loc[:, ['stock_id', 'month', 'monthly_return', 'dividend_yield']]
+    
     final_df = final_df.fillna(0)
     return final_df
 
@@ -319,7 +336,7 @@ if __name__ == "__main__":
     # 範例3：使用summary合併股價與除權息資料
     print("--- 測試合併股價與除權息資料 ---")
     df = summary_monthly_data(
-        stock_id='2330'
+        stock_id='00893',
         )
     
     if not df.empty:
