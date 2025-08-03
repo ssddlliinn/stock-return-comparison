@@ -6,48 +6,20 @@ import plotly.express as px
 import plotly.io as pio
 import json
 import numpy as np
+import re
 
 app = Flask(__name__)
 
-# 這是一個模擬的資料處理函數
-# 請用您自己處理好的資料來取代這個函數
-# 這個函數會根據股票代碼產生月報酬率和股息殖利率資料
-def get_monthly_returns_data(stock_id, start_date = '2010-01-01', end_date = None):
-    """
-    根據股票代碼模擬生成月報酬資料。
-    在您的實際應用中，請用您自己的資料前處理程式碼來替換這裡。
-    """
-    
-    df = summary_monthly_data(
-        stock_id=stock_id,
-        start_date=start_date,
-        end_date=end_date
-    )
-    
-    if df.empty:
-        return pd.DataFrame()
-    
-    # 計算總報酬率 (Total Return) = 月報酬 + 股息殖利率
-    df['total_return'] = df['monthly_return'] + df['dividend_yield']
-    # 計算累計報酬率 (Cumulative Return)
-    df['cumulative_return'] = (1 + df['total_return']).cumprod() - 1
-    # 把年月格式(period轉換成字串，才可以正常顯示在圖表中
-    if isinstance(df['month'][0], pd.Period):
-        df['month'] = df['month'].dt.strftime('%Y-%m')
-    df['cumulative_return'] = df['cumulative_return'].round(6)
-    return df
+def calculate_portfolio_returns(stocks, weights, start_date, end_date):
+    pass
 
 def calculate_metrics(df, reinvest_dividends, initial_capital):
     """
     計算並回傳量化指標的函數。
     """
-    # 根據是否領出股息調整報酬率
-    # if reinvest_dividends == 'false':
-    #     df['effective_return'] = df['monthly_return']
-    # else:
-    #     df['effective_return'] = df['monthly_return'] + df['dividend_yield']
-
+    df = df.copy()
     # 計算年化報酬率 (Annualized Return)
+    # 取累積報酬率最後一個值就是整個區間整體報酬率
     total_periods = len(df)
     total_cumulative_return = df['cumulative_return'].iloc[-1]
     annualized_return = ((1 + total_cumulative_return)**(12/total_periods) - 1).round(6)
@@ -56,7 +28,10 @@ def calculate_metrics(df, reinvest_dividends, initial_capital):
     annualized_volatility = (df['effective_return'].std() * np.sqrt(12)).round(6)
 
     # 計算總領股息
-    df['cumulative_value'] = df['cumulative_value'].shift(1).fillna(initial_capital)
+    # specific:表示把殖利率比照第一個投資組合做提領
+    # true:表示全部再投資，不會有現金被領出
+    # false:按照其原本的配發條件做配發
+    df['cumulative_value'] = df['cumulative_value'].shift(1).fillna(initial_capital).copy()
     if 'specific_dividend_yield' in df.columns:
         total_dividends = (df['specific_dividend_yield'] * df['cumulative_value']).round(0).sum()
     elif reinvest_dividends == 'true':
@@ -103,6 +78,7 @@ def get_chart_data():
         if stock_id:
             df = summary_monthly_data(
                 stock_id=stock_id,
+                market='us' if re.match(r'^[A-Z\^\.]+$', stock_id) else 'tw',
                 start_date=start_date_str,
                 end_date=end_date_str
             )
@@ -112,8 +88,6 @@ def get_chart_data():
                 earliest_month.append(df['month'].min())
                 time_preprocess_dfs.append((stock_id, df))
                 print(f'股票:{stock_id}的最早資料年月為{df["month"].min().strftime("%Y-%m")}')
-                # print(df["month"].max().strftime("%Y-%m"))
-                # print(end_date_str)
                 assert df["month"].max().strftime("%Y-%m") != end_date_str[:8], f"{stock_id}資料最後與結束日期對不上"
             else:
                 return jsonify({'error': f'無法找到股票代碼{stock_id}或資料。請重新輸入。'}), 400
@@ -122,14 +96,16 @@ def get_chart_data():
     
     for stock_id, df in time_preprocess_dfs:
         # df period 可以跟string格式的年月直接比較
-        df = df[df['month'] >= start_month]
+        df = df[df['month'] >= start_month].copy().reset_index()
         # 根據下拉式選單選項計算累計報酬率
         if reinvest_dividends == 'specific':
             if stock_id == stocks_input[0]:
                 specify_div = df['dividend_yield']
+                # print(specify_div)
                 df['effective_return'] = df['monthly_return']
             else:
                 df['specific_dividend_yield'] = specify_div
+                # print(df['specific_dividend_yield'])
                 df['effective_return'] = df['monthly_return'] + df['dividend_yield'] - df['specific_dividend_yield']
         elif reinvest_dividends == 'true':
             df['effective_return'] = df['monthly_return'] + df['dividend_yield']
@@ -141,7 +117,7 @@ def get_chart_data():
         # 計算累積價值
         df['cumulative_value'] = initial_capital * (1 + df['cumulative_return'])
         
-        if isinstance(df['month'][0], pd.Period):
+        if isinstance(df['month'].iloc[0], pd.Period):
             df['month'] = df['month'].dt.strftime('%Y-%m')
         df['cumulative_return'] = df['cumulative_return'].round(6)
         
@@ -149,7 +125,6 @@ def get_chart_data():
         # 用df資料計算顯示在表格的資訊
         metrics.append(calculate_metrics(df, reinvest_dividends, initial_capital))
 
-    print(metrics)
     if not all(dataframes):
         return jsonify({'error': '無法找到股票代碼或資料。請重新輸入。'}), 400
     
