@@ -10,8 +10,38 @@ import re
 
 app = Flask(__name__)
 
-def calculate_portfolio_returns(stocks, weights, start_date, end_date):
-    pass
+def calculate_portfolio_returns(portfolio, portfolio_dfs, start_month):
+    """
+    根據使用者輸入計算投資組合的月報酬率。
+    """
+    total_df = None
+    
+    # 變更點：現在 portfolio_data 是一個字典，我們用 .items() 來遍歷
+    for stock_id, weight in portfolio.items():
+        weight = int(weight) / 100
+        
+        df = portfolio_dfs[stock_id]
+        if not df.empty:
+            assert df['stock_id'].iloc[0] == stock_id, f"股票代碼{stock_id}與月報酬資料代碼{df['stock_id'].iloc[0]}對不上"
+            df = df[df['month'] >= start_month].copy().reset_index()
+            if not df.empty:
+                df.set_index('month', inplace=True)
+                df = df.drop('stock_id', axis=1)
+                if total_df is None:
+                    total_df = df * weight
+                else:
+                    total_df += df * weight
+
+    # port_df = pd.DataFrame({
+    #     'month': total_returns.index,
+    #     'monthly_return': total_returns.values,
+    #     'dividend_yield': total_dividends.values
+    # })
+    # port_df['total_return'] = port_df['monthly_return'] + port_df['dividend_yield']
+    # port_df['cumulative_return'] = (1 + port_df['total_return']).cumprod() - 1
+    total_df.reset_index(inplace=True)
+    
+    return total_df
 
 def calculate_metrics(df, reinvest_dividends, initial_capital):
     """
@@ -26,6 +56,9 @@ def calculate_metrics(df, reinvest_dividends, initial_capital):
 
     # 計算波動率 (Annualized Volatility)
     annualized_volatility = (df['effective_return'].std() * np.sqrt(12)).round(6)
+    
+    # 計算最大跌幅(MDD)
+    MDD = (df['cumulative_value'] / df['cumulative_value'].cummax() - 1).min()
 
     # 計算總領股息
     # specific:表示把殖利率比照第一個投資組合做提領
@@ -44,6 +77,7 @@ def calculate_metrics(df, reinvest_dividends, initial_capital):
     return {
         'annualized_return': annualized_return,
         'annualized_volatility': annualized_volatility,
+        'MDD': MDD,
         'total_dividends': total_dividends
     }
 
@@ -60,46 +94,64 @@ def get_chart_data():
     API 路由，處理來自前端的 POST 請求，並回傳圖表資料。
     """
     #取得所有從網頁回傳的資料
-    stocks_input = [request.form.get(f'stock{i}_id') for i in range(1, 4)]
-    reinvest_dividends = request.form.get('reinvest_dividends')
-    initial_capital = float(request.form.get('initial_capital'))
-    display_mode = request.form.get('display_mode')
     start_date_str = request.form.get('start_date')
     end_date_str = request.form.get('end_date')
+    initial_capital = float(request.form.get('initial_capital'))
+    reinvest_dividends = request.form.get('reinvest_dividends')
+    display_mode = request.form.get('display_mode')
+    portfolios_data = [
+        request.form.get('portfolio1_data'),
+        request.form.get('portfolio2_data'),
+        request.form.get('portfolio3_data')
+    ]
+    # print(portfolios_data)
+    # exit()
 
-    time_preprocess_dfs = []
+    valid_portfolios = []
     dataframes = []
     metrics = []
     earliest_month = []
     specify_div = None
     start_month = None
+    stocks_input = None
 
-    for stock_id in stocks_input:
-        if stock_id:
-            df = summary_monthly_data(
-                stock_id=stock_id,
-                market='us' if re.match(r'^[A-Z\^\.]+$', stock_id) else 'tw',
-                start_date=start_date_str,
-                end_date=end_date_str
-            )
+    for p_data in portfolios_data:
+        if p_data:
+            portfolio = json.loads(p_data)
+            stocks_in_portfolio = list(portfolio.keys())
             
-            # 如果有空的資料，就直接回傳找不到資料
-            if not df.empty:
-                earliest_month.append(df['month'].min())
-                time_preprocess_dfs.append((stock_id, df))
-                print(f'股票:{stock_id}的最早資料年月為{df["month"].min().strftime("%Y-%m")}')
-                assert df["month"].max().strftime("%Y-%m") != end_date_str[:8], f"{stock_id}資料最後與結束日期對不上"
-            else:
-                return jsonify({'error': f'無法找到股票代碼{stock_id}或資料。請重新輸入。'}), 400
-            
-            start_month = max(earliest_month)
+            portfolio_dfs = {}
+            for stock_id in stocks_in_portfolio:
+                df = summary_monthly_data(
+                    stock_id=stock_id,
+                    market='us' if re.match(r'^[A-Z\^\.]+$', stock_id) else 'tw',
+                    start_date=start_date_str,
+                    end_date=end_date_str
+                )
+                
+                # 如果有空的資料，就直接回傳找不到資料
+                if not df.empty:
+                    earliest_month.append(df['month'].min())
+                    portfolio_dfs[stock_id] = df
+                    print(f'股票:{stock_id}的最早資料年月為{df["month"].min().strftime("%Y-%m")}')
+                    assert df["month"].max().strftime("%Y-%m") != end_date_str[:8], f"{stock_id}資料最後與結束日期對不上"
+                else:
+                    return jsonify({'error': f'無法找到股票代碼{stock_id}或資料。請重新輸入。'}), 400
+            if portfolio_dfs:
+                valid_portfolios.append(portfolio_dfs)
     
-    for stock_id, df in time_preprocess_dfs:
+    if not valid_portfolios:
+        return jsonify({'error': f'無法找到股票代碼{stock_id}或資料。請重新輸入。'}), 400            
+    start_month = max(earliest_month)
+    
+    for i, portfolio in enumerate(portfolios_data):
         # df period 可以跟string格式的年月直接比較
-        df = df[df['month'] >= start_month].copy().reset_index()
+        # df = df[df['month'] >= start_month].copy().reset_index()
+        portfolio = json.loads(portfolio)
+        df = calculate_portfolio_returns(portfolio, valid_portfolios[i], start_month)
         # 根據下拉式選單選項計算累計報酬率
         if reinvest_dividends == 'specific':
-            if stock_id == stocks_input[0]:
+            if i == 0:
                 specify_div = df['dividend_yield']
                 # print(specify_div)
                 df['effective_return'] = df['monthly_return']
@@ -121,7 +173,7 @@ def get_chart_data():
             df['month'] = df['month'].dt.strftime('%Y-%m')
         df['cumulative_return'] = df['cumulative_return'].round(6)
         
-        dataframes.append((stock_id, df))
+        dataframes.append((f"投資組合{i+1}", df))
         # 用df資料計算顯示在表格的資訊
         metrics.append(calculate_metrics(df, reinvest_dividends, initial_capital))
 
@@ -149,7 +201,8 @@ def get_chart_data():
     # 圖表美化設定
     fig.update_layout(
         title={
-            'text': f'{stocks_input[0]} vs {stocks_input[1]} vs {stocks_input[2]}股票累計報酬率比較',
+            # 'text': f'{stocks_input[0]} vs {stocks_input[1]} vs {stocks_input[2]}股票累計報酬率比較',
+            'text': f'投資組合1 vs 投資組合2 vs 投資組合3 股票累計報酬率比較',
             'y':0.95,
             'x':0.5,
             'xanchor': 'center',
@@ -204,7 +257,7 @@ def get_chart_data():
     return jsonify({
         'graph_json': graph_json,
         'metrics': {
-            'stocks_input': [si for si in stocks_input if si],
+            'stocks_input': ['投資組合1', '投資組合2', '投資組合3'],
             'metrics_data': metrics
         }
     })
