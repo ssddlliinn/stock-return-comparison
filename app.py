@@ -18,11 +18,13 @@ def calculate_portfolio_returns(portfolio, portfolio_dfs, start_month):
     
     # 變更點：現在 portfolio_data 是一個字典，我們用 .items() 來遍歷
     for stock_id, weight in portfolio.items():
+        print(stock_id, weight)
         weight = int(weight) / 100
         
         df = portfolio_dfs[stock_id]
         if not df.empty:
             assert df['stock_id'].iloc[0] == stock_id, f"股票代碼{stock_id}與月報酬資料代碼{df['stock_id'].iloc[0]}對不上"
+            # df period 可以跟string格式的年月直接比較
             df = df[df['month'] >= start_month].copy().reset_index()
             if not df.empty:
                 df.set_index('month', inplace=True)
@@ -32,16 +34,9 @@ def calculate_portfolio_returns(portfolio, portfolio_dfs, start_month):
                 else:
                     total_df += df * weight
 
-    # port_df = pd.DataFrame({
-    #     'month': total_returns.index,
-    #     'monthly_return': total_returns.values,
-    #     'dividend_yield': total_dividends.values
-    # })
-    # port_df['total_return'] = port_df['monthly_return'] + port_df['dividend_yield']
-    # port_df['cumulative_return'] = (1 + port_df['total_return']).cumprod() - 1
     total_df.reset_index(inplace=True)
     
-    return total_df
+    return total_df #['month', 'monthly_return', 'dividend_yield']
 
 def calculate_metrics(df, reinvest_dividends, initial_capital):
     """
@@ -69,6 +64,8 @@ def calculate_metrics(df, reinvest_dividends, initial_capital):
         total_dividends = (df['specific_dividend_yield'] * df['cumulative_value']).round(0).sum()
     elif reinvest_dividends == 'true':
         total_dividends = 0
+    elif 'dividend_value' in df.columns:
+        total_dividends = df['dividend_value'].sum()
     else:
         total_dividends = (df['dividend_yield'] * df['cumulative_value']).round(0).sum()
     
@@ -96,6 +93,7 @@ def get_chart_data():
     #取得所有從網頁回傳的資料
     start_date_str = request.form.get('start_date')
     end_date_str = request.form.get('end_date')
+    rebalance = request.form.get('rebalance')
     initial_capital = float(request.form.get('initial_capital'))
     reinvest_dividends = request.form.get('reinvest_dividends')
     display_mode = request.form.get('display_mode')
@@ -104,8 +102,6 @@ def get_chart_data():
         request.form.get('portfolio2_data'),
         request.form.get('portfolio3_data')
     ]
-    # print(portfolios_data)
-    # exit()
 
     valid_portfolios = []
     dataframes = []
@@ -113,9 +109,8 @@ def get_chart_data():
     earliest_month = []
     specify_div = None
     start_month = None
-    stocks_input = None
 
-    for p_data in portfolios_data:
+    for p_data in portfolios_data: #list of dict-like strings, content is portfolios like stock_a: weight
         if p_data:
             portfolio = json.loads(p_data)
             stocks_in_portfolio = list(portfolio.keys())
@@ -138,40 +133,93 @@ def get_chart_data():
                 else:
                     return jsonify({'error': f'無法找到股票代碼{stock_id}或資料。請重新輸入。'}), 400
             if portfolio_dfs:
-                valid_portfolios.append(portfolio_dfs)
+                valid_portfolios.append(portfolio_dfs)  
+                ### list of portfolios, where every portfolio is a dict having keys as stock_id and 
+                ### value of return data df
     
     if not valid_portfolios:
         return jsonify({'error': f'無法找到股票代碼{stock_id}或資料。請重新輸入。'}), 400            
     start_month = max(earliest_month)
     
-    for i, portfolio in enumerate(portfolios_data):
-        # df period 可以跟string格式的年月直接比較
-        # df = df[df['month'] >= start_month].copy().reset_index()
+    for i, portfolio in enumerate(portfolios_data): #list of dict-like strings, content is portfolios like stock_a: weight
         portfolio = json.loads(portfolio)
-        df = calculate_portfolio_returns(portfolio, valid_portfolios[i], start_month)
-        # 根據下拉式選單選項計算累計報酬率
-        if reinvest_dividends == 'specific':
-            if i == 0:
-                specify_div = df['dividend_yield']
-                # print(specify_div)
-                df['effective_return'] = df['monthly_return']
+        
+        # 產出一個['month', 'monthly_return', 'dividend_yield', ('specific_dividend_yield'), 
+        # 'effective_return', 'cumulative_return', 'cumulative_value']
+        if rebalance == 'true': ###### 先用權重乘以月報酬及股利，再依條件得到有效月報酬，最後算出總金額
+            df = calculate_portfolio_returns(portfolio, valid_portfolios[i], start_month)
+            # 根據下拉式選單選項計算累計報酬率
+            if reinvest_dividends == 'specific':
+                if i == 0:
+                    specify_div = df['dividend_yield']
+                    df['effective_return'] = df['monthly_return']
+                else:
+                    df['specific_dividend_yield'] = specify_div
+                    df['effective_return'] = df['monthly_return'] + df['dividend_yield'] - df['specific_dividend_yield']
+            elif reinvest_dividends == 'true':
+                df['effective_return'] = df['monthly_return'] + df['dividend_yield']
             else:
-                df['specific_dividend_yield'] = specify_div
-                # print(df['specific_dividend_yield'])
-                df['effective_return'] = df['monthly_return'] + df['dividend_yield'] - df['specific_dividend_yield']
-        elif reinvest_dividends == 'true':
-            df['effective_return'] = df['monthly_return'] + df['dividend_yield']
-        else:
-            df['effective_return'] = df['monthly_return']
-            
-        df['cumulative_return'] = (1 + df['effective_return']).cumprod() - 1
+                df['effective_return'] = df['monthly_return']
+                
+            df['cumulative_return'] = (1 + df['effective_return']).cumprod() - 1
 
-        # 計算累積價值
-        df['cumulative_value'] = initial_capital * (1 + df['cumulative_return'])
+            # 計算累積價值
+            df['cumulative_value'] = initial_capital * (1 + df['cumulative_return'])
+        
+        # 產出一個['month', 'monthly_return', 'dividend_yield', ('dividend_value'), 
+        # 'effective_return', 'cumulative_return', 'cumulative_value']
+        else: ###### 先個別算出總金額，再用權重得到最後總金額，再回推有效報酬
+            
+            # 從有效投資組合列表中取得對應的資料
+            stock_data_dict = valid_portfolios[i]
+            
+            # 初始化累積報酬和現金股利
+            combined_cumulative_value = None
+            
+            for stock_id, weight in portfolio.items():
+                print(stock_id, weight)
+                weight = weight / 100
+                df_stock = stock_data_dict[stock_id]
+                df_stock = df_stock[df_stock['month'] >= start_month].copy().reset_index()
+                
+                # 計算每檔股票的累積價值
+                if reinvest_dividends == 'true':
+                    # 股息再投入
+                    df_stock['cumulative_return'] = (1 + df_stock['monthly_return'] + df_stock['dividend_yield']).cumprod() - 1
+                    df_stock['cumulative_value'] = initial_capital * weight * (1 + df_stock['cumulative_return'])
+                    df_stock['dividend_value'] = 0
+                else:
+                    # 股息不再投入
+                    df_stock['cumulative_return'] = (1 + df_stock['monthly_return']).cumprod() - 1
+                    df_stock['cumulative_value'] = initial_capital * weight * (1 + df_stock['cumulative_return'])
+                    df_stock['dividend_value'] = df_stock['cumulative_value'].shift(1).fillna(initial_capital * weight) * df_stock['dividend_yield']
+                
+                # df_stock['cumulative_value'] = initial_capital * weight * (1 + df_stock['cumulative_return'])
+                df_stock.set_index('month', inplace=True)
+                df_stock = df_stock.drop('stock_id', axis=1)
+                # print(df_stock)
+                
+                if combined_cumulative_value is None:
+                    combined_cumulative_value = df_stock.copy()
+                else:
+                    combined_cumulative_value += df_stock
+            
+            # 回推投資組合的報酬率
+            combined_cumulative_value.reset_index(inplace=True)
+            df = combined_cumulative_value.copy()
+            df['cumulative_return'] = (df['cumulative_value'] / initial_capital) - 1
+            
+            # 為了計算指標，我們需要 `effective_return`，可以從 `cumulative_return` 回推
+            # 但這是一個簡化方式，可能與實際的 monthly_return 有微小誤差
+            df['effective_return'] = df['cumulative_value'].pct_change().fillna(0)
         
         if isinstance(df['month'].iloc[0], pd.Period):
             df['month'] = df['month'].dt.strftime('%Y-%m')
         df['cumulative_return'] = df['cumulative_return'].round(6)
+        df['effective_return'] = df['effective_return'].round(6)
+        df['cumulative_value'] = df['cumulative_value'].round(0)
+        df['dividend_value'] = df['dividend_value'].round(0)
+        # print(df)
         
         dataframes.append((f"投資組合{i+1}", df))
         # 用df資料計算顯示在表格的資訊

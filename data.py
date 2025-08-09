@@ -300,7 +300,7 @@ if __name__ == "__main__":
     # tw_stock_data = get_finmind_data(
     #     # dataset_name='taiwan_stock_dividend_result',
     #     dataset_name='taiwan_stock_daily',
-    #     stock_id='3008',
+    #     stock_id='2330',
     #     start_date='2005-01-01',
     #     end_date='2024-12-31'
     # )
@@ -336,7 +336,7 @@ if __name__ == "__main__":
     # 範例3：使用summary合併股價與除權息資料
     print("--- 測試合併股價與除權息資料 ---")
     df = summary_monthly_data(
-        stock_id='00893',
+        stock_id='2330',
         )
     
     if not df.empty:

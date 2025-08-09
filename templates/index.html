@@ -183,10 +183,18 @@
                 <input type="number" id="initial_capital" value="100000" min="1000">
             </div>
             <div class="input-item">
+                <label for="rebalance">再平衡:</label>
+                <select id="rebalance" onchange="handleRebalanceChange(this)">
+                    <option value="true">是</option>
+                    <option value="false">否</option>
+                </select>
+            </div>
+            <div class="input-item">
                 <label for="reinvest_dividends">股息處理:</label>
                 <select id="reinvest_dividends">
                     <option value="true">再投入 (Reinvest)</option>
                     <option value="false">領出 (Withdraw)</option>
+                    <option value="specific">效仿投資組合1 (Specific)</option>
                 </select>
             </div>
             <div class="input-item">
@@ -237,10 +245,25 @@
         const NUM_PORTFOLIO_STOCKS = 5;
 
         const defaultPortfolios = [
-            [{ stock_id: '0050', weight: 100 }],
             [{ stock_id: '0056', weight: 100 }],
-            [{ stock_id: 'TSMC', weight: 50 }, { stock_id: 'NVDA', weight: 50 }]
+            [{ stock_id: '0050', weight: 70 }, { stock_id: 'IEF', weight: 30 }],
+            [{ stock_id: 'SPY', weight: 70 }, { stock_id: 'IEF', weight: 30 }]
         ];
+
+        function handleRebalanceChange(selectElement) {
+            const rebalanceEnabled = selectElement.value === 'false';
+            const reinvestSelect = document.getElementById('reinvest_dividends');
+            const portfolio1Option = reinvestSelect.querySelector('option[value="specific"]');
+            
+            if (rebalanceEnabled) {
+                portfolio1Option.disabled = true;
+                if (reinvestSelect.value === 'specific') {
+                    reinvestSelect.value = 'true'; // 預設為再投入
+                }
+            } else {
+                portfolio1Option.disabled = false;
+            }
+        }
         
         function renderPortfolioInputs() {
             for (let i = 1; i <= 3; i++) {
@@ -313,6 +336,7 @@
 
         async function fetchChart() {
             const portfolios = getPortfolioData();
+            const rebalance = document.getElementById('rebalance').value;
             const reinvest_dividends = document.getElementById('reinvest_dividends').value;
             const initial_capital = document.getElementById('initial_capital').value;
             const display_mode = document.getElementById('display_mode').value;
@@ -342,6 +366,7 @@
                 portfolios.forEach((p, i) => {
                     formData.append(`portfolio${i+1}_data`, p);
                 });
+                formData.append('rebalance', rebalance);
                 formData.append('reinvest_dividends', reinvest_dividends);
                 formData.append('initial_capital', initial_capital);
                 formData.append('display_mode', display_mode);
@@ -412,7 +437,7 @@
 
             tableHTML += `<tr><td>總領股息</td>`;
             metricsData.forEach(m => {
-                tableHTML += `<td>$${m.total_dividends.toFixed(2)}</td>`;
+                tableHTML += `<td>$${m.total_dividends.toFixed(0)}</td>`;
             });
             tableHTML += `</tr>`;
 
