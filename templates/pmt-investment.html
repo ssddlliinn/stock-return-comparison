@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>股價報酬率比較工具</title>
+    <title>年金報酬率比較工具</title>
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <style>
         body {
@@ -164,7 +164,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>投資組合報酬率比較</h1>
+        <h1>投資組合年金報酬率比較</h1>
 
         <div class="input-row">
             <div class="input-item">
@@ -179,8 +179,8 @@
 
         <div class="input-row">
             <div class="input-item">
-                <label for="initial_capital">初始資本:</label>
-                <input type="number" id="initial_capital" value="100000" min="1000">
+                <label for="annuity_capital">每期投入資本:</label>
+                <input type="number" id="annuity_capital" value="10000" min="1000">
             </div>
             <div class="input-item">
                 <label for="rebalance">再平衡:</label>
@@ -195,13 +195,6 @@
                     <option value="true">再投入 (Reinvest)</option>
                     <option value="false">領出 (Withdraw)</option>
                     <option value="specific">效仿投資組合1 (Specific)</option>
-                </select>
-            </div>
-            <div class="input-item">
-                <label for="display_mode">圖表Y軸顯示:</label>
-                <select id="display_mode">
-                    <option value="return">累計報酬率</option>
-                    <option value="value">累積金額</option>
                 </select>
             </div>
         </div>
@@ -247,7 +240,7 @@
         const defaultPortfolios = [
             [{ stock_id: '0056', weight: 100 }],
             [{ stock_id: '0050', weight: 70 }, { stock_id: 'IEF', weight: 30 }],
-            [{ stock_id: 'SPY', weight: 70 }, { stock_id: 'IEF', weight: 30 }]
+            [{ stock_id: 'SPY', weight: 100 }]
         ];
 
         function handleRebalanceChange(selectElement) {
@@ -338,8 +331,7 @@
             const portfolios = getPortfolioData();
             const rebalance = document.getElementById('rebalance').value;
             const reinvest_dividends = document.getElementById('reinvest_dividends').value;
-            const initial_capital = document.getElementById('initial_capital').value;
-            const display_mode = document.getElementById('display_mode').value;
+            const annuity_capital = document.getElementById('annuity_capital').value;
             const start_date = document.getElementById('start_date').value;
             const end_date = document.getElementById('end_date').value;
             
@@ -358,7 +350,7 @@
                 errorMessage.textContent = '請至少輸入一個有效的投資組合。';
                 errorMessage.style.display = 'block';
                 loadingMessage.style.display = 'none';
-                return;
+                return;df_stock
             }
 
             try {
@@ -368,13 +360,12 @@
                 });
                 formData.append('rebalance', rebalance);
                 formData.append('reinvest_dividends', reinvest_dividends);
-                formData.append('initial_capital', initial_capital);
-                formData.append('display_mode', display_mode);
+                formData.append('annuity_capital', annuity_capital);
                 formData.append('start_date', start_date);
                 formData.append('end_date', end_date);
 
 
-                const response = await fetch('/get_chart_data', {
+                const response = await fetch('/get_annuity_chart_data', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded',
@@ -393,7 +384,7 @@
 
                 loadingMessage.style.display = 'none';
                 Plotly.newPlot('plotly-chart', graph_json.data, graph_json.layout);
-                renderMetricsTable(metrics, display_mode);
+                renderMetricsTable(metrics);
 
             } catch (error) {
                 console.error('獲取資料時發生錯誤:', error);
@@ -403,7 +394,7 @@
             }
         }
         
-        function renderMetricsTable(metrics, display_mode) {
+        function renderMetricsTable(metrics) {
             const metricsTableContainer = document.getElementById('metrics-table-container');
             const stocks = metrics.stocks_input;
             const metricsData = metrics.metrics_data;
@@ -416,30 +407,24 @@
             });
             tableHTML += `</tr></thead><tbody>`;
 
-            tableHTML += `<tr><td>年化報酬率</td>`;
-            metricsData.forEach(m => {
-                tableHTML += `<td>${(m.annualized_return * 100).toFixed(2)}%</td>`;
-            });
-            tableHTML += `</tr>`;
-
-            tableHTML += `<tr><td>年化波動率</td>`;
-            metricsData.forEach(m => {
-                tableHTML += `<td>${(m.annualized_volatility * 100).toFixed(2)}%</td>`;
-            });
-            tableHTML += `</tr>`;
-
-            // 最大跌幅
-            tableHTML += `<tr><td>最大跌幅(MDD)</td>`;
-            metricsData.forEach(m => {
-                tableHTML += `<td>${(m.MDD * 100).toFixed(2)}%</td>`;
-            });
-            tableHTML += `</tr>`;
-
             tableHTML += `<tr><td>期末累積金額</td>`;
             metricsData.forEach(m => {
                 tableHTML += `<td>$${parseFloat(m.final_return).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>`;
             });
             tableHTML += `</tr>`;
+
+            // tableHTML += `<tr><td>年化波動率</td>`;
+            // metricsData.forEach(m => {
+            //     tableHTML += `<td>${(m.annualized_volatility * 100).toFixed(2)}%</td>`;
+            // });
+            // tableHTML += `</tr>`;
+
+            // 最大跌幅
+            // tableHTML += `<tr><td>最大跌幅(MDD)</td>`;
+            // metricsData.forEach(m => {
+            //     tableHTML += `<td>${(m.MDD * 100).toFixed(2)}%</td>`;
+            // });
+            // tableHTML += `</tr>`;
 
             tableHTML += `<tr><td>總領股息</td>`;
             metricsData.forEach(m => {

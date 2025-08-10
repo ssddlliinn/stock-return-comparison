@@ -9,6 +9,7 @@ DATASET_BASE_PATH = Path(r'.\dataset')
 API_TOKEN = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNS0wNy0yNiAxNToxOToxNyIsInVzZXJfaWQiOiJBbmR5MzA2IiwiaXAiOiIxNzUuMTgxLjE3OC4xNSJ9.By2XXOdZXgc_ng21sG9Nf9rjjBuu19WxJEHsIc4tNL4'
 DATASETS = dir(DataLoader())
 TW_TRADING_DATES = pd.to_datetime(pd.read_parquet(r'.\dataset\tw_trading_date.parquet')['date'])
+US_TRADING_DATES = pd.to_datetime(pd.read_parquet(r'.\dataset\us_trading_date.parquet')['date'])
 
 def get_finmind_data(dataset_name, start_date = '1996-01-01', end_date = None, stock_id = '2330', **kwargs):
     """
@@ -52,7 +53,11 @@ def get_finmind_data(dataset_name, start_date = '1996-01-01', end_date = None, s
         local_files = [f for f in os.listdir(dataset_path) if f.endswith('.parquet')]
         
     # 2. 取出所有要下載日期的list[目前trading date 以台積電1996-2024的交易日為主]
-    download_date_set = set(TW_TRADING_DATES[TW_TRADING_DATES.between(start_date, end_date)])
+    if dataset_name == 'us_stock_price':
+        download_date_set = set(US_TRADING_DATES[US_TRADING_DATES.between(start_date, end_date)])
+    else:
+        download_date_set = set(TW_TRADING_DATES[TW_TRADING_DATES.between(start_date, end_date)])
+        
     
     # 3. 檢查本地資料
     local_data_exists = False
@@ -251,6 +256,12 @@ def summary_monthly_data(stock_id, market='tw', start_date = '1996-01-01', end_d
     price_data = price_data.set_index('date')
     # 以月分為單位做groupby，取最後交易日股價並做百分比增減，得到月份報酬資料(日期以最後交易日表示)
     monthly_last_close = price_data.groupby([pd.Grouper(freq='ME')])[price_col].last() # 一般groupby只能以日為單位，要用Grouper才能以年、月、劑等頻率整併資料
+    #TODO: 處理0050分割問題
+    if stock_id == '0050':
+        # print(monthly_last_close.tail(10))
+        condition = monthly_last_close.index > '2025-06-18'
+        monthly_last_close.loc[condition] = monthly_last_close.loc[condition] * 4
+    
     monthly_summary = pd.DataFrame({'monthly_return':monthly_last_close.pct_change()})
     
     monthly_summary = monthly_summary.reset_index()

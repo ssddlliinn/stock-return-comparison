@@ -363,11 +363,32 @@
                 let explanationText = "";
                 const numFormatter = new Intl.NumberFormat('en-US');
                 if (target_output === 'pv_annuity') {
-                    explanationText = `這筆年金的現值為 ${numFormatter.format(data.pv_annuity.toFixed(0))}。這代表如果您現在需要一次性領取這筆錢，可以領到這麼多。`;
+                    if (!isNaN(inputs['pmt'])) {
+                        explanationText = `若每年還款${numFormatter.format(inputs['pmt'])}元，年利率${numFormatter.format(inputs['rate_annuity']*100)}%，持續${numFormatter.format(inputs['n_annuity'])}年，你現在可以借到 ${numFormatter.format(Math.abs(data.pv_annuity).toFixed(0))} 元。`;
+                    } else if(!isNaN(inputs['fv_annuity'])) {
+                        explanationText = `若你希望${numFormatter.format(inputs['n_annuity'])}年後有${numFormatter.format(inputs['fv_annuity'])}元，且年利率${numFormatter.format(inputs['rate_annuity']*100)}%，你現在要存入 ${numFormatter.format(data.fv_annuity.toFixed(0))} 元。`;
+                    } else {
+                        explanationText = `這筆年金的現值為 ${numFormatter.format(data.pv_annuity.toFixed(0))}。這代表如果您現在需要一次性領取這筆錢，可以領到這麼多。`;
+                    }
+                    
                 } else if (target_output === 'fv_annuity') {
-                    explanationText = `這筆年金在未來將累積至 ${numFormatter.format(data.fv_annuity.toFixed(0))} 的價值。這是您在期滿後可以領取的總金額。`;
+                    if (isNaN(inputs['pv_annuity'])) {
+                        explanationText = `若每年存${numFormatter.format(inputs['pmt'])}元，年利率${numFormatter.format(inputs['rate_annuity']*100)}%，持續${numFormatter.format(inputs['n_annuity'])}年，最後你會擁有 ${numFormatter.format(data.fv_annuity.toFixed(0))} 元。`;
+                    } else if(!isNaN(inputs['pv_annuity'])) {
+                        explanationText = `若你一開始有${numFormatter.format(inputs['pv_annuity'])}元，每年再存${numFormatter.format(inputs['pmt'])}元，年利率${numFormatter.format(inputs['rate_annuity']*100)}%，持續${numFormatter.format(inputs['n_annuity'])}年，最後你會擁有 ${numFormatter.format(data.fv_annuity.toFixed(0))} 元。`;
+                    } else {
+                        explanationText = `這筆年金在未來將累積至 ${numFormatter.format(data.fv_annuity.toFixed(0))} 的價值。這是您在期滿後可以領取的總金額。`;
+                    }
+                
                 } else if (target_output === 'pmt') {
-                    explanationText = `為了達到目標，您每年需要投入 ${numFormatter.format(data.pmt.toFixed(0))}。這是您每年必須存入的金額。`;
+                    if (!isNaN(inputs['fv_annuity'])) {
+                        explanationText = `若想要在${numFormatter.format(inputs['n_annuity'])}年後存到${numFormatter.format(inputs['fv_annuity'])}元，報酬率${numFormatter.format(inputs['rate_annuity']*100)}%的情況下，每年要存 ${numFormatter.format(data.pmt.toFixed(0))} 元。`;
+                    } else if(!isNaN(inputs['pv_annuity'])) {
+                        explanationText = `若你跟銀行貸款${numFormatter.format(inputs['pv_annuity'])}元，年利率${numFormatter.format(inputs['rate_annuity']*100)}%，還款期間${numFormatter.format(inputs['n_annuity'])}年，你每年需要償還的金額為${numFormatter.format(Math.abs(data.pmt).toFixed(0))} 元。`;
+                    } else {
+                        explanationText = `為了達到目標，您每年需要投入 ${numFormatter.format(data.pmt.toFixed(0))}。這是您每年必須存入的金額。`;
+                    }
+                    
                 } else if (target_output === 'rate_annuity') {
                     explanationText = `您的年金報酬率為 ${(data.rate_annuity * 100).toFixed(2)}%。這是在這個期間內每年獲得的平均報酬。`;
                 } else if (target_output === 'n_annuity') {
