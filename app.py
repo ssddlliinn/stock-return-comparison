@@ -310,6 +310,138 @@ def get_chart_data():
         }
     })
 
+
+@app.route('/calculate_compound', methods=['POST'])
+def calculate_compound():
+    pv = request.json.get('pv')
+    fv = request.json.get('fv')
+    rate = request.json.get('rate')
+    n = request.json.get('n')
+
+    if fv is not None and pv is not None and fv < pv:
+        return jsonify({'error': '未來值不可小於現值。'}), 400
+
+    if pv is not None and fv is not None and rate is not None and n is None:
+        n = np.log(fv / pv) / np.log(1 + rate)
+    elif pv is not None and fv is not None and n is not None and rate is None:
+        rate = (fv / pv)**(1/n) - 1
+    elif pv is not None and rate is not None and n is not None and fv is None:
+        fv = pv * (1 + rate)**n
+    elif fv is not None and rate is not None and n is not None and pv is None:
+        pv = fv / (1 + rate)**n
+    else:
+        return jsonify({'error': '請提供三個變數。'}), 400
+
+    return jsonify({
+        'pv': round(pv, 0),
+        'fv': round(fv, 0),
+        'rate': round(rate, 6),
+        'n': round(n, 2)
+    })
+
+@app.route('/calculate_annuity', methods=['POST'])
+def calculate_annuity():
+    import numpy_financial as npf
+    
+    target_output = request.json.get('target_output')
+    pv_annuity = request.json.get('pv_annuity') or 0
+    fv_annuity = request.json.get('fv_annuity') or 0
+    pmt = request.json.get('pmt') or 0
+    rate_annuity = request.json.get('rate_annuity') or 0
+    n_annuity = request.json.get('n_annuity') or 0
+
+    print(pv_annuity, fv_annuity, pmt, rate_annuity, n_annuity)
+    
+    # 根據不同目標及現有值計算目標的金額
+    # 檢查報酬率為 0 的特殊情況
+    if rate_annuity == 0 and target_output != 'rate_annuity':
+        if fv_annuity is None:
+            fv_annuity = pv_annuity + pmt * n_annuity
+        if pv_annuity is None:
+            pv_annuity = fv_annuity - pmt * n_annuity
+        if pmt is None:
+            pmt = (fv_annuity - pv_annuity) / n_annuity
+        if n_annuity is None:
+            n_annuity = (fv_annuity - pv_annuity) / pmt
+    
+    # 根據缺少的變數，套用對應的公式
+    if target_output ==  'fv_annuity':
+        # 計算未來值 (FV)
+        fv_annuity = pv_annuity * (1 + rate_annuity)**n_annuity + pmt * (((1 + rate_annuity)**n_annuity - 1) / rate_annuity)
+    
+    elif target_output == 'pv_annuity':
+        # 計算現在值 (PV)
+        term1 = pmt * (((1 + rate_annuity)**n_annuity - 1) / rate_annuity)
+        pv_annuity =  (fv_annuity - term1) / (1 + rate_annuity)**n_annuity
+        
+    elif target_output == 'pmt':
+        # 計算年金 (PMT)
+        term1 = pv_annuity * (1 + rate_annuity)**n_annuity
+        term2 = ((1 + rate_annuity)**n_annuity - 1) / rate_annuity
+        pmt = (fv_annuity - term1) / term2
+        
+    elif target_output == 'n_annuity':
+        # 計算年數 (n)，需要使用對數運算
+        # 如果 pv * r + pmt 是負數，則無法計算，這代表無法達成目標
+        numerator = (fv_annuity * rate_annuity + pmt)
+        denominator = (pv_annuity * rate_annuity + pmt)
+        
+        if denominator == 0 or numerator/denominator <= 0:
+             raise ValueError("無法計算年數，請檢查輸入參數。")
+
+        # 使用 NumPy 進行對數運算
+        n_annuity = np.log(numerator / denominator) / np.log(1 + rate_annuity)
+    
+    elif target_output == 'rate_annuity':
+        # 實務上會使用 numpy-financial 或 scipy.optimize 等函式庫。
+        # raise NotImplementedError("目前無法透過簡單公式計算報酬率，請使用專門的財務計算函式庫。")
+        rate_annuity = npf.rate(nper=n_annuity, pmt=-pmt, pv=-pv_annuity, fv=fv_annuity)
+
+    
+    # if pv_annuity is not None and pmt is not None and rate_annuity is not None and n_annuity is None:
+    #     # 計算 n_annuity
+    #     # 這裡的公式比較複雜，可以根據需求來實現，目前先留空
+    #     return jsonify({'error': '此計算尚未實作。'}), 400
+    # elif pv_annuity is not None and pmt is not None and n_annuity is not None and rate_annuity is None:
+    #     # 計算 rate_annuity
+    #     return jsonify({'error': '此計算尚未實作。'}), 400
+    # elif pv_annuity is not None and rate_annuity is not None and n_annuity is not None and pmt is None:
+    #     # 計算 pmt
+    #     pmt = pv_annuity * (rate_annuity / (1 - (1 + rate_annuity)**(-n_annuity)))
+    # elif pmt is not None and rate_annuity is not None and n_annuity is not None and pv_annuity is None:
+    #     # 計算 pv_annuity
+    #     pv_annuity = pmt * (1 - (1 + rate_annuity)**(-n_annuity)) / rate_annuity
+    # else:
+    #     return jsonify({'error': '請提供三個變數。'}), 400
+
+    return jsonify({
+        'pv_annuity': pv_annuity,
+        'fv_annuity': fv_annuity,
+        'pmt': pmt,
+        'rate_annuity': rate_annuity,
+        'n_annuity': n_annuity
+    })
+
+@app.route('/calculate_table', methods=['POST'])
+def calculate_table():
+    initial_capital = request.json.get('initial_capital')
+    years = [10, 20, 30]
+    rates = [0.04, 0.08, 0.12, 0.16]
+    results = []
+
+    for year in years:
+        row = []
+        for rate in rates:
+            future_value = initial_capital * (1 + rate)**year
+            row.append(future_value)
+        results.append(row)
+
+    return jsonify({'results': results})
+
+@app.route('/calculator')
+def new_page():
+    return render_template('calculator.html')
+
 if __name__ == '__main__':
     # 啟動 Flask 伺服器
     app.run(debug=True)
