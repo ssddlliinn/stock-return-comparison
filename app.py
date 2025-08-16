@@ -365,12 +365,16 @@ def get_annuity_chart_data():
             
             portfolio_dfs = {}
             for stock_id in stocks_in_portfolio:
-                df = summary_monthly_data(
-                    stock_id=stock_id,
-                    market='us' if re.match(r'^[A-Z\^\.]+$', stock_id) else 'tw',
-                    start_date=start_date_str,
-                    end_date=end_date_str
-                )
+                if stock_id == 'PENSION_FUND':
+                    df = pd.read_parquet(r'dataset\pension.parquet')
+                    df = df[df['month'].between(start_date_str, end_date_str)]
+                else:
+                    df = summary_monthly_data(
+                        stock_id=stock_id,
+                        market='us' if re.match(r'^[A-Z\^\.]+$', stock_id) else 'tw',
+                        start_date=start_date_str,
+                        end_date=end_date_str
+                    )
                 
                 # 如果有空的資料，就直接回傳找不到資料
                 if not df.empty:
@@ -412,7 +416,7 @@ def get_annuity_chart_data():
             # 計算累積價值
             df['annuity'] = annuity_capital
             df['cumulative_value'] = 0
-            df.loc[0, 'cumulative_value'] = df.loc[0, 'annuity'] * (1 + df.loc[0, 'effective_return'])
+            df.loc[0, 'cumulative_value'] = np.int64(round(df.loc[0, 'annuity'] * (1 + df.loc[0, 'effective_return']), 2))
             
             for j in range(1, len(df)):
                 previous_cumulative = df.loc[j - 1, 'cumulative_value']
