@@ -130,11 +130,17 @@ def get_finmind_data(dataset_name, start_date = '1996-01-01', end_date = None, s
                     #以download_date_set的起始日跟結束日作為FinMind資料的輸入值
                     download_start_date_str = download_date_set[0].strftime('%Y-%m-%d') #已經sort過了，所以可以直接取第一跟最後
                     download_end_date_str = download_date_set[-1].strftime('%Y-%m-%d')
-                    finmind_df = dataset_method(
-                        stock_id = stock_id, 
-                        start_date = download_start_date_str,
-                        end_date = download_end_date_str
-                    )
+                    if stock_id is None:
+                        finmind_df = dataset_method(
+                            start_date = download_start_date_str,
+                            end_date = download_end_date_str
+                        )
+                    else:
+                        finmind_df = dataset_method(
+                            stock_id = stock_id, 
+                            start_date = download_start_date_str,
+                            end_date = download_end_date_str
+                        )
                 else: #讀取特定日期所有資料
                     for date in download_date_set:
                         date_str = date.strftime('%Y-%m-%d')
@@ -345,14 +351,17 @@ if __name__ == "__main__":
     # )
     
     # 範例3：使用summary合併股價與除權息資料
-    print("--- 測試合併股價與除權息資料 ---")
-    df = summary_monthly_data(
-        stock_id='2330',
-        )
+    # print("--- 測試合併股價與除權息資料 ---")
+    # df = summary_monthly_data(
+    #     stock_id='2330',
+    #     )
     
-    if not df.empty:
-        print(f"Successfully retrieved Summary Date. Last 5 rows:\n{df.head()}\n{df.tail()}")
-        print(df.dtypes)
-    else:
-        print("Failed to retrieve Summary Data.")
-        
+    # if not df.empty:
+    #     print(f"Successfully retrieved Summary Date. Last 5 rows:\n{df.head()}\n{df.tail()}")
+    #     print(df.dtypes)
+    # else:
+    #     print("Failed to retrieve Summary Data.")
+    
+    
+    #個別使用
+    pass    

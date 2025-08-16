@@ -137,12 +137,16 @@ def get_chart_data():
             
             portfolio_dfs = {}
             for stock_id in stocks_in_portfolio:
-                df = summary_monthly_data(
-                    stock_id=stock_id,
-                    market='us' if re.match(r'^[A-Z\^\.]+$', stock_id) else 'tw',
-                    start_date=start_date_str,
-                    end_date=end_date_str
-                )
+                if stock_id == 'PENSION_FUND':
+                    df = pd.read_parquet(r'dataset\pension.parquet')
+                    df = df[df['month'].between(start_date_str, end_date_str)]
+                else:
+                    df = summary_monthly_data(
+                        stock_id=stock_id,
+                        market='us' if re.match(r'^[A-Z\^\.]+$', stock_id) else 'tw',
+                        start_date=start_date_str,
+                        end_date=end_date_str
+                    )
                 
                 # 如果有空的資料，就直接回傳找不到資料
                 if not df.empty:
