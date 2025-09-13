@@ -66,6 +66,7 @@ def get_finmind_data(dataset_name, start_date = '1996-01-01', end_date = None, s
 
     if local_files:
         #讀取資料庫，所有資料版本都從1996開始
+        #****當股票代碼為all時，跑遍所有年份資料庫，挑取需要的年份資料做讀取並使用
         print(f"Checking existing local data for {dataset_name} {stock_id}...")
         for f in sorted(local_files): # 按名稱排序，通常按年份排
             if (f[:4] not in {str(i.year) for i in download_date_set}) and (stock_id == 'all'):
@@ -289,8 +290,9 @@ def summary_monthly_data(stock_id, market='tw', start_date = '1996-01-01', end_d
             div_data['date'] = pd.to_datetime(div_data['date'])
             # 把日期資料換成以月分資料表示
             div_data['month'] = div_data['date'].dt.to_period('M')
-            div_data['yield'] = div_data['stock_and_cache_dividend'] / div_data['before_price'] #計算股價值利率
-            monthly_div = pd.DataFrame({'month':div_data['month'], 'dividend_yield':div_data['yield']})
+            div_data['dividend_yield'] = div_data['stock_and_cache_dividend'] / div_data['before_price'] #計算股價殖利率
+            monthly_div = div_data.groupby('month')['dividend_yield'].sum().reset_index()
+            
 
             # 以股票代碼及年月為合併基準，把月報酬跟除權息殖利率合併
             # no index、columns=['stock_id', 'month', 'monthly_return', 'dividend_yield']
@@ -317,9 +319,9 @@ if __name__ == "__main__":
     # tw_stock_data = get_finmind_data(
     #     # dataset_name='taiwan_stock_dividend_result',
     #     dataset_name='taiwan_stock_daily',
-    #     stock_id='2330',
+    #     stock_id='2882',
     #     start_date='2005-01-01',
-    #     end_date='2024-12-31'
+    #     end_date='2025-06-30'
     # )
     
     # if not tw_stock_data.empty:
@@ -351,10 +353,14 @@ if __name__ == "__main__":
     # )
     
     # 範例3：使用summary合併股價與除權息資料
-    # print("--- 測試合併股價與除權息資料 ---")
-    # df = summary_monthly_data(
-    #     stock_id='2330',
-    #     )
+    print("--- 測試合併股價與除權息資料 ---")
+    df = summary_monthly_data(
+        stock_id='2882',
+        start_date='2005-01-01',
+        end_date='2025-06-30'
+        )
+    print(df[df['month'] == '2008-07'])
+    # print(df.tail(20))
     
     # if not df.empty:
     #     print(f"Successfully retrieved Summary Date. Last 5 rows:\n{df.head()}\n{df.tail()}")

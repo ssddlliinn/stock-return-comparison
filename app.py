@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request, jsonify
-from data import summary_monthly_data
+from summary import summary_monthly_data
 import pandas as pd
 import plotly.graph_objs as go
 import plotly.express as px
@@ -25,18 +25,15 @@ def calculate_portfolio_returns(portfolio, portfolio_dfs, start_month):
         if not df.empty:
             assert df['stock_id'].iloc[0] == stock_id, f"股票代碼{stock_id}與月報酬資料代碼{df['stock_id'].iloc[0]}對不上"
             # df period 可以跟string格式的年月直接比較
-            df = df[df['month'] >= start_month].copy().reset_index()
+            df = df[df.index >= start_month].copy()
             if not df.empty:
-                df.set_index('month', inplace=True)
                 df = df.drop('stock_id', axis=1)
                 if total_df is None:
                     total_df = df * weight
                 else:
                     total_df += df * weight
-
-    total_df.reset_index(inplace=True)
     
-    return total_df #['month', 'monthly_return', 'dividend_yield']
+    return total_df #'month':['monthly_return', 'dividend_yield']
 
 def calculate_metrics(df, reinvest_dividends, initial_capital, annuity_mode=False):
     """
@@ -70,12 +67,12 @@ def calculate_metrics(df, reinvest_dividends, initial_capital, annuity_mode=Fals
     # true:表示全部再投資，不會有現金被領出
     # false:按照其原本的配發條件做配發
     df['cumulative_value'] = df['cumulative_value'].shift(1).fillna(initial_capital).copy()
-    if 'specific_dividend_yield' in df.columns:
+    if 'dividend_value' in df.columns:
+        total_dividends = int(df['dividend_value'].sum())
+    elif 'specific_dividend_yield' in df.columns:
         total_dividends = (df['specific_dividend_yield'] * df['cumulative_value']).round(0).sum()
     elif reinvest_dividends == 'true':
         total_dividends = 0
-    elif 'dividend_value' in df.columns:
-        total_dividends = df['dividend_value'].sum()
     else:
         total_dividends = (df['dividend_yield'] * df['cumulative_value']).round(0).sum()
     
@@ -138,8 +135,8 @@ def get_chart_data():
             portfolio_dfs = {}
             for stock_id in stocks_in_portfolio:
                 if stock_id == 'PENSION_FUND':
-                    df = pd.read_parquet(r'dataset\pension.parquet')
-                    df = df[df['month'].between(start_date_str, end_date_str)]
+                    df = pd.read_parquet(r'C:\Users\ANDY\Desktop\dataset\pension.parquet')
+                    df = df[df.index.between(start_date_str, end_date_str)]
                 else:
                     df = summary_monthly_data(
                         stock_id=stock_id,
@@ -150,10 +147,10 @@ def get_chart_data():
                 
                 # 如果有空的資料，就直接回傳找不到資料
                 if not df.empty:
-                    earliest_month.append(df['month'].min())
+                    earliest_month.append(df.index.min())
                     portfolio_dfs[stock_id] = df
-                    print(f'股票:{stock_id}的最早資料年月為{df["month"].min().strftime("%Y-%m")}')
-                    assert df["month"].max().strftime("%Y-%m") != end_date_str[:8], f"{stock_id}資料最後與結束日期對不上"
+                    print(f'股票:{stock_id}的最早資料年月為{df.index.min().strftime("%Y-%m")}')
+                    assert df.index.max().strftime("%Y-%m") != end_date_str[:8], f"{stock_id}資料最後與結束日期對不上"
                 else:
                     return jsonify({'error': f'無法找到股票代碼{stock_id}或資料。請重新輸入。'}), 400
             if portfolio_dfs:
@@ -168,7 +165,7 @@ def get_chart_data():
     for i, portfolio in enumerate(portfolios_data): #list of dict-like strings, content is portfolios like stock_a: weight
         portfolio = json.loads(portfolio)
         
-        # 產出一個['month', 'monthly_return', 'dividend_yield', ('specific_dividend_yield'), 
+        # 產出一個'month' :['monthly_return', 'dividend_yield', ('specific_dividend_yield'), 
         # 'effective_return', 'cumulative_return', 'cumulative_value']
         if rebalance == 'true': ###### 先用權重乘以月報酬及股利，再依條件得到有效月報酬，最後算出總金額
             df = calculate_portfolio_returns(portfolio, valid_portfolios[i], start_month)
@@ -204,7 +201,7 @@ def get_chart_data():
                 print(stock_id, weight)
                 weight = weight / 100
                 df_stock = stock_data_dict[stock_id]
-                df_stock = df_stock[df_stock['month'] >= start_month].copy().reset_index()
+                df_stock = df_stock[df_stock.index >= start_month].copy()
                 
                 # 計算每檔股票的累積價值
                 if reinvest_dividends == 'true':
@@ -219,17 +216,19 @@ def get_chart_data():
                     df_stock['dividend_value'] = df_stock['cumulative_value'].shift(1).fillna(initial_capital * weight) * df_stock['dividend_yield']
                 
                 # df_stock['cumulative_value'] = initial_capital * weight * (1 + df_stock['cumulative_return'])
-                df_stock.set_index('month', inplace=True)
+                
                 df_stock = df_stock.drop('stock_id', axis=1)
                 # print(df_stock)
                 
                 if combined_cumulative_value is None:
                     combined_cumulative_value = df_stock.copy()
                 else:
+                    print(df_stock.head(5))
+                    print(df_stock.tail(5))
+                    # print(len(df_stock.index))
                     combined_cumulative_value += df_stock
             
             # 回推投資組合的報酬率
-            combined_cumulative_value.reset_index(inplace=True)
             df = combined_cumulative_value.copy()
             df['cumulative_return'] = (df['cumulative_value'] / initial_capital) - 1
             
@@ -238,8 +237,8 @@ def get_chart_data():
             df['effective_return'] = df['cumulative_value'].pct_change().fillna(0)
             df['dividend_value'] = df['dividend_value'].round(0)
         
-        if isinstance(df['month'].iloc[0], pd.Period):
-            df['month'] = df['month'].dt.strftime('%Y-%m')
+        
+        df.index = df.index.strftime('%Y-%m')
         df['cumulative_return'] = df['cumulative_return'].round(6)
         df['effective_return'] = df['effective_return'].round(6)
         df['cumulative_value'] = df['cumulative_value'].round(0)
@@ -256,14 +255,14 @@ def get_chart_data():
     fig = go.Figure()
     
     # 定義三種線條顏色
-    line_colors = ["#00f2ff", '#d62728', "#eeff00"]
+    line_colors = ["#2c4cff", '#d62728', "#2ed728"]
     
     for i, (stock_id, df) in enumerate(dataframes):
         y_data = df['cumulative_value'].to_list() if display_mode == 'value' else df['cumulative_return'].to_list()
         y_title = '累積金額' if display_mode == 'value' else '累計報酬率'
         
         fig.add_trace(go.Scatter(
-            x=df['month'].to_list(),
+            x=df.index.to_list(),
             y=y_data,
             mode='lines',
             line=dict(color=line_colors[i], width=2),
@@ -284,7 +283,7 @@ def get_chart_data():
         xaxis_title='月份',
         yaxis_title='累計報酬率',
         hovermode='x unified', # 鼠標懸停時顯示所有線條的資料
-        template='plotly_dark', # 使用黑色背景模板
+        template='plotly', # 使用黑色背景模板
         font=dict(
             family="Arial, sans-serif",
             size=12,
@@ -311,12 +310,11 @@ def get_chart_data():
         yaxis=dict(
             showgrid=True,
             gridwidth=0.3,
-            gridcolor='#333333',
             tickformat=".2%" if display_mode == 'return' else "$.0f", # Y軸刻度顯示為百分比
         ),
         hoverlabel=dict(
-            font=dict(color='#888888'),
-            bgcolor='#ffffff',
+            # font=dict(color="#030000"),
+            # bgcolor='#ffffff',
             font_size=16,
             font_family="Rockwell"
         )
@@ -366,8 +364,8 @@ def get_annuity_chart_data():
             portfolio_dfs = {}
             for stock_id in stocks_in_portfolio:
                 if stock_id == 'PENSION_FUND':
-                    df = pd.read_parquet(r'dataset\pension.parquet')
-                    df = df[df['month'].between(start_date_str, end_date_str)]
+                    df = pd.read_parquet(r'C:\Users\ANDY\Desktop\dataset\pension.parquet')
+                    df = df[df.index.between(start_date_str, end_date_str)]
                 else:
                     df = summary_monthly_data(
                         stock_id=stock_id,
@@ -378,10 +376,10 @@ def get_annuity_chart_data():
                 
                 # 如果有空的資料，就直接回傳找不到資料
                 if not df.empty:
-                    earliest_month.append(df['month'].min())
+                    earliest_month.append(df.index.min())
                     portfolio_dfs[stock_id] = df
-                    print(f'股票:{stock_id}的最早資料年月為{df["month"].min().strftime("%Y-%m")}')
-                    assert df["month"].max().strftime("%Y-%m") != end_date_str[:8], f"{stock_id}資料最後與結束日期對不上"
+                    print(f'股票:{stock_id}的最早資料年月為{df.index.min().strftime("%Y-%m")}')
+                    assert df.index.max().strftime("%Y-%m") != end_date_str[:8], f"{stock_id}資料最後與結束日期對不上"
                 else:
                     return jsonify({'error': f'無法找到股票代碼{stock_id}或資料。請重新輸入。'}), 400
             if portfolio_dfs:
@@ -396,7 +394,7 @@ def get_annuity_chart_data():
     for i, portfolio in enumerate(portfolios_data): #list of dict-like strings, content is portfolios like stock_a: weight
         portfolio = json.loads(portfolio)
         
-        # 產出一個['month', 'monthly_return', 'dividend_yield', ('specific_dividend_yield'), 
+        # 產出一個'month':['monthly_return', 'dividend_yield', ('specific_dividend_yield'), 
         # 'effective_return', 'cumulative_value'] ##年金投資不會有累積報酬率
         if rebalance == 'true': ###### 先用權重乘以月報酬及股利，再依條件得到有效月報酬，最後算出總金額
             df = calculate_portfolio_returns(portfolio, valid_portfolios[i], start_month)
@@ -414,6 +412,8 @@ def get_annuity_chart_data():
                 df['effective_return'] = df['monthly_return']
 
             # 計算累積價值
+            # 懶得改程式，先reset後再重新set
+            df.reset_index(inplace=True)
             df['annuity'] = annuity_capital
             df['cumulative_value'] = 0
             df.loc[0, 'cumulative_value'] = np.int64(round(df.loc[0, 'annuity'] * (1 + df.loc[0, 'effective_return']), 2))
@@ -424,8 +424,10 @@ def get_annuity_chart_data():
                 current_return_rate = df.loc[j, 'effective_return']
 
                 df.loc[j, 'cumulative_value'] = round((previous_cumulative + current_investment) * (1 + current_return_rate), 0)
-        
-        # 產出一個['month', 'monthly_return', 'dividend_yield', ('dividend_value'), 
+
+            df.set_index('month', inplace=True)
+            
+        # 產出一個'month'['monthly_return', 'dividend_yield', ('dividend_value'), 
         # 'effective_return', 'cumulative_value']
         else: ###### 先個別算出總金額，再用權重得到最後總金額，再回推有效報酬
             
@@ -439,16 +441,17 @@ def get_annuity_chart_data():
                 print(stock_id, weight)
                 weight = weight / 100
                 df_stock = stock_data_dict[stock_id]
-                df_stock = df_stock[df_stock['month'] >= start_month].copy().reset_index()
+                df_stock = df_stock[df_stock.index >= start_month].copy()
                 
                 # 計算每檔股票的累積價值
+                df_stock.reset_index(inplace=True)
                 if reinvest_dividends == 'true':
                     # 股息再投入
                     df_stock['effective_return'] = df_stock['monthly_return'] + df_stock['dividend_yield']
                     # 計算累積價值
                     df_stock['annuity'] = annuity_capital * weight
                     df_stock['cumulative_value'] = 0
-                    df_stock.loc[0, 'cumulative_value'] = df_stock.loc[0, 'annuity'] * (1 + df_stock.loc[0, 'effective_return'])
+                    df_stock.loc[0, 'cumulative_value'] = np.int64(df_stock.loc[0, 'annuity'] * (1 + df_stock.loc[0, 'effective_return']))
                     
                     for j in range(1, len(df_stock)):
                         previous_cumulative = df_stock.loc[j - 1, 'cumulative_value']
@@ -457,13 +460,14 @@ def get_annuity_chart_data():
 
                         df_stock.loc[j, 'cumulative_value'] = round((previous_cumulative + current_investment) * (1 + current_return_rate), 0)
                     df_stock['dividend_value'] = 0
+                    
                 else:
                     # 股息不再投入
                     df_stock['effective_return'] = df_stock['monthly_return']
                     # 計算累積價值
                     df_stock['annuity'] = annuity_capital * weight
                     df_stock['cumulative_value'] = 0
-                    df_stock.loc[0, 'cumulative_value'] = df_stock.loc[0, 'annuity'] * (1 + df_stock.loc[0, 'effective_return'])
+                    df_stock.loc[0, 'cumulative_value'] = np.int64(df_stock.loc[0, 'annuity'] * (1 + df_stock.loc[0, 'effective_return']))
                     
                     for j in range(1, len(df_stock)):
                         previous_cumulative = df_stock.loc[j - 1, 'cumulative_value']
@@ -473,7 +477,6 @@ def get_annuity_chart_data():
                         df_stock.loc[j, 'cumulative_value'] = round((previous_cumulative + current_investment) * (1 + current_return_rate), 0)
                     df_stock['dividend_value'] = df_stock['cumulative_value'].shift(1).fillna(annuity_capital * weight) * df_stock['dividend_yield']
                 
-                # df_stock['cumulative_value'] = initial_capital * weight * (1 + df_stock['cumulative_return'])
                 df_stock.set_index('month', inplace=True)
                 df_stock = df_stock.drop('stock_id', axis=1)
                 # print(df_stock)
@@ -483,7 +486,6 @@ def get_annuity_chart_data():
                 else:
                     combined_cumulative_value += df_stock
             
-            combined_cumulative_value.reset_index(inplace=True)
             df = combined_cumulative_value.copy()
             df['dividend_value'] = df['dividend_value'].round(0)
             # df['cumulative_return'] = (df['cumulative_value'] / initial_capital) - 1
@@ -492,8 +494,7 @@ def get_annuity_chart_data():
             # 但這是一個簡化方式，可能與實際的 monthly_return 有微小誤差
             # df['effective_return'] = df['cumulative_value'].pct_change().fillna(0)
         
-        if isinstance(df['month'].iloc[0], pd.Period):
-            df['month'] = df['month'].dt.strftime('%Y-%m')
+        df.index = df.index.strftime('%Y-%m')
         # df['cumulative_return'] = df['cumulative_return'].round(6)
         df['effective_return'] = df['effective_return'].round(6)
         df['cumulative_value'] = df['cumulative_value'].round(0)
@@ -511,14 +512,14 @@ def get_annuity_chart_data():
     fig = go.Figure()
     
     # 定義三種線條顏色
-    line_colors = ["#00f2ff", '#d62728', "#eeff00"]
+    line_colors = ["#2c4cff", '#d62728', "#2ed728"]
     
     for i, (stock_id, df) in enumerate(dataframes):
         y_data = df['cumulative_value'].to_list()
         y_title = '累積金額'
         
         fig.add_trace(go.Scatter(
-            x=df['month'].to_list(),
+            x=df.index.to_list(),
             y=y_data,
             mode='lines',
             line=dict(color=line_colors[i], width=2),
@@ -539,7 +540,7 @@ def get_annuity_chart_data():
         xaxis_title='月份',
         yaxis_title='累計報酬率',
         hovermode='x unified', # 鼠標懸停時顯示所有線條的資料
-        template='plotly_dark', # 使用黑色背景模板
+        template='plotly',
         font=dict(
             family="Arial, sans-serif",
             size=12,
@@ -551,7 +552,7 @@ def get_annuity_chart_data():
             y=1.02,
             xanchor="right",
             x=1,
-            font=dict(color='#888888', weight=10),
+            font=dict(color="#130000", weight=10),
             bgcolor='#ffffff',
             bordercolor='#ccc',
             borderwidth=0.5
@@ -566,12 +567,11 @@ def get_annuity_chart_data():
         yaxis=dict(
             showgrid=True,
             gridwidth=0.3,
-            gridcolor='#333333',
             tickformat="$.0f", # Y軸刻度顯示為百分比
         ),
         hoverlabel=dict(
-            font=dict(color='#888888'),
-            bgcolor='#ffffff',
+            # font=dict(color='#888888'),
+            # bgcolor='#ffffff',
             font_size=16,
             font_family="Rockwell"
         )
@@ -581,6 +581,8 @@ def get_annuity_chart_data():
     # 使用 plotly.io.to_json 來確保輸出標準 JSON 格式
     graph_json = pio.to_json(fig, engine='json')
 
+    # print(type(graph_json))
+    print(metrics)
     return jsonify({
         'graph_json': graph_json,
         'metrics': {
@@ -675,6 +677,7 @@ def calculate_annuity():
         # raise NotImplementedError("目前無法透過簡單公式計算報酬率，請使用專門的財務計算函式庫。")
         rate_annuity = npf.rate(nper=n_annuity, pmt=-pmt, pv=-pv_annuity, fv=fv_annuity)
 
+    
     return jsonify({
         'pv_annuity': pv_annuity,
         'fv_annuity': fv_annuity,
