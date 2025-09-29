@@ -7,6 +7,7 @@ import plotly.io as pio
 import json
 import numpy as np
 import re
+import os
 
 app = Flask(__name__)
 
@@ -135,8 +136,13 @@ def get_chart_data():
             portfolio_dfs = {}
             for stock_id in stocks_in_portfolio:
                 if stock_id == 'PENSION_FUND':
-                    df = pd.read_parquet(r'C:\Users\ANDY\Desktop\dataset\pension.parquet')
-                    df = df[df.index.between(start_date_str, end_date_str)]
+                    pension_path = os.getenv('PENSION_DATA_PATH', './dataset/pension.parquet')
+                    try:
+                        df = pd.read_parquet(pension_path)
+                        df = df[df.index.between(start_date_str, end_date_str)]
+                    except FileNotFoundError:
+                        print(f"Warning: Pension data file not found at {pension_path}")
+                        df = pd.DataFrame()
                 else:
                     df = summary_monthly_data(
                         stock_id=stock_id,
@@ -364,8 +370,13 @@ def get_annuity_chart_data():
             portfolio_dfs = {}
             for stock_id in stocks_in_portfolio:
                 if stock_id == 'PENSION_FUND':
-                    df = pd.read_parquet(r'C:\Users\ANDY\Desktop\dataset\pension.parquet')
-                    df = df[df.index.between(start_date_str, end_date_str)]
+                    pension_path = os.getenv('PENSION_DATA_PATH', './dataset/pension.parquet')
+                    try:
+                        df = pd.read_parquet(pension_path)
+                        df = df[df.index.between(start_date_str, end_date_str)]
+                    except FileNotFoundError:
+                        print(f"Warning: Pension data file not found at {pension_path}")
+                        df = pd.DataFrame()
                 else:
                     df = summary_monthly_data(
                         stock_id=stock_id,
@@ -643,6 +654,12 @@ def calculate_annuity():
             pmt = (fv_annuity - pv_annuity) / n_annuity
         if n_annuity is None:
             n_annuity = (fv_annuity - pv_annuity) / pmt
+    else:
+        # 修正：添加輸入驗證
+        if rate_annuity < 0:
+            return jsonify({'error': '報酬率不能為負數'}), 400
+        if n_annuity <= 0:
+            return jsonify({'error': '期數必須大於0'}), 400
     
     # 根據缺少的變數，套用對應的公式
     if target_output ==  'fv_annuity':

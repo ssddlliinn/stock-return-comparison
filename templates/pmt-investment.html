@@ -318,8 +318,9 @@
                 });
                 
                 if (Object.keys(portfolio).length > 0) {
+                    // 修正：允許權重總和不等於100%，但需要警告用戶
                     if (totalWeight !== 100) {
-                        throw new Error(`投資組合 ${i} 的權重總和不為 100%，請修正。`);
+                        console.warn(`投資組合 ${i} 的權重總和為 ${totalWeight}%，不等於100%。這可能影響投資結果的準確性。`);
                     }
                     portfolios.push(JSON.stringify(portfolio));
                 }

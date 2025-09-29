@@ -1,6 +1,6 @@
 import sys
 import pandas as pd
-sys.path.append(r'C:\Users\ANDY\Desktop\data_program')
+# sys.path.append(r'C:\Users\YourUsername\Desktop\data_program')  # Commented out for deployment
 from data_general import get_finmind_data # type: ignore
 
 

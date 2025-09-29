@@ -1,2 +1,9 @@
 dataset
 return_comparison
+*.ipynb
+*.md
+.env
+*.pyc
+__pycache__/
+.DS_Store
+*.log
